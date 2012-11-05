@@ -1,5 +1,6 @@
 
 #include <iostream>
+#include <QCoreApplication>
 #include "peerdrive.h"
 
 static void printStore(const PMounts::Store *store, bool automatic)
@@ -25,8 +26,9 @@ static void printStores(void)
 		printStore(store, false);
 }
 
-int main(int /*argc*/, char** /*argv*/)
+int main(int argc, char** argv)
 {
+	QCoreApplication app(argc, argv);
 	printStores();
 	return 0;
 }

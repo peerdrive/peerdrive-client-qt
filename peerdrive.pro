@@ -1,4 +1,5 @@
 QT += network
+CONFIG += console
 
 SOURCES += peerdrive.cpp
 SOURCES += enum.cpp
