@@ -2,7 +2,15 @@ TEMPLATE = app
 CONFIG += console
 QT = core
 
-INCLUDEPATH += ../peerdrive-qt
+INCLUDEPATH += ..
 LIBS += -L../peerdrive-qt -lpeerdrive-qt
-SOURCES += enum.cpp
 TARGET = peerdrive
+
+QMAKE_CXXFLAGS += -ffunction-sections
+QMAKE_CXXFLAGS += -fdata-sections
+QMAKE_LFLAGS += -Wl,-gc-sections
+
+SOURCES += optparse.cpp
+SOURCES += peerdrive.cpp
+SOURCES += mount.cpp
+
