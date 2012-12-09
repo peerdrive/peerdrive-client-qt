@@ -696,6 +696,38 @@ Mounts::Store* Mounts::fromSId(const DId &sid) const
 	return NULL;
 }
 
+DId Mounts::mount(int *result, const QString &src, const QString &label,
+                  const QString &type, const QString &options,
+                  const QString &credentials)
+{
+	MountReq req;
+	MountCnf cnf;
+
+	req.set_src(src.toUtf8().constData());
+	req.set_label(label.toUtf8().constData());
+	req.set_type(type.toUtf8().constData());
+	if (!options.isEmpty())
+		req.set_options(options.toUtf8().constData());
+	if (!credentials.isEmpty())
+		req.set_credentials(credentials.toUtf8().constData());
+
+	int err = Connection::defaultRPC<MountReq, MountCnf>(MOUNT_MSG, req, cnf);
+	if (result)
+		*result = err;
+	if (err)
+		return DId();
+
+	return DId(cnf.sid());
+}
+
+int Mounts::unmount(const DId &sid)
+{
+	UnmountReq req;
+
+	req.set_sid(sid.toStdString());
+	return Connection::defaultRPC<UnmountReq>(UNMOUNT_MSG, req);
+}
+
 /****************************************************************************/
 
 RevInfo::RevInfo()

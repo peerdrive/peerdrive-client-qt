@@ -172,6 +172,12 @@ Option& Option::setActionStoreFalse()
 	return *this;
 }
 
+Option& Option::setActionCounter()
+{
+	m_action = Counter;
+	return *this;
+}
+
 int Option::match(const QString &tag, const QString &match,
                   const QStringList &remaining, QMap<QString, QVariant> &options)
 {
@@ -233,7 +239,24 @@ int Option::match(const QString &tag, const QString &match,
 				options[m_dest] = m_constant;
 				return TagMatched;
 			}
+
+		case Counter:
+		{
+			int value = options.value(m_dest, QVariant(0)).toInt() + 1;
+
+			if (tag.startsWith("--")) {
+				if (tag != match)
+					return TagDidntMatch; // must match completely
+				options[m_dest] = QVariant(value);
+				return 1;
+			} else {
+				options[m_dest] = QVariant(value);
+				return TagMatched;
+			}
+		}
 	};
+
+	return TagDidntMatch;
 }
 
 /*****************************************************************************/
@@ -285,6 +308,11 @@ void OptionParser::setDefault(const QString &dest, const QVariant &value)
 void OptionParser::setProgramName(const QString &name)
 {
 	helpProgramName = name;
+}
+
+void OptionParser::setDescription(const QString &description)
+{
+	helpDescription = description;
 }
 
 OptionParser::Result OptionParser::parseArgs()
@@ -382,6 +410,9 @@ void OptionParser::printHelp() const
 {
 	QString usage = helpUsage;
 	std::cout << qPrintable(usage.replace("$prog", helpProgramName)) << "\n\n";
+
+	if (!helpDescription.isEmpty())
+		std::cout << qPrintable(helpDescription) << "\n\n";
 
 	std::cout << "Options:\n";
 	foreach (AbstractOption *opt, m_options)

@@ -189,6 +189,11 @@ public:
 	Store* fromLabel(const QString &label) const;
 	Store* fromSId(const DId &sid) const;
 
+	static DId mount(int *result, const QString &src, const QString &label,
+	                 const QString &type, const QString &options = QString(),
+					 const QString &credentials = QString());
+	static int unmount(const DId &sid);
+
 private:
 	Store *parse(const EnumCnf_Store &pb);
 	Store *m_sysStore;

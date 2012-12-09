@@ -80,6 +80,7 @@ public:
 	Option& setActionStoreConst(const QVariant &value);
 	Option& setActionStoreTrue();
 	Option& setActionStoreFalse();
+	Option& setActionCounter();
 
 protected:
 	virtual QString helpJoinTags(const QStringList &tags) const;
@@ -90,7 +91,8 @@ protected:
 private:
 	enum Action {
 		StoreArg,
-		StoreConst
+		StoreConst,
+		Counter
 	};
 
 	Type m_type;
@@ -114,6 +116,7 @@ public:
 
 	void setDefault(const QString &dest, const QVariant &value);
 	void setProgramName(const QString &name);
+	void setDescription(const QString &description);
 
 	enum Result {
 		Ok,
@@ -139,6 +142,7 @@ private:
 
 	QString helpProgramName;
 	QString helpUsage;
+	QString helpDescription;
 };
 
 #endif

@@ -16,8 +16,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <QSet>
 #include <QStringList>
-#include <QtDebug>
 #include <iostream>
 
 #include <peerdrive-qt/peerdrive.h>
@@ -28,11 +28,34 @@
 
 using namespace PeerDrive;
 
-static void printStore(const Mounts::Store *store, bool automatic)
+static std::string string_to_hex(const std::string& input)
+{
+    static const char* const lut = "0123456789abcdef";
+    size_t len = input.length();
+
+    std::string output;
+    output.reserve(2 * len);
+    for (size_t i = 0; i < len; ++i) {
+        const unsigned char c = (unsigned char)input[i];
+        output.push_back(lut[c >> 4]);
+        output.push_back(lut[c & 15]);
+    }
+
+    return output;
+}
+
+static void printStore(const Mounts::Store *store, bool automatic, bool showSId,
+                       const QString &credentials = QString())
 {
 	std::cout << "'" << qPrintable(store->src) << "' as '"
-		<< qPrintable(store->label) << "' type '"
+		<< qPrintable(store->label) << "'";
+	if (showSId)
+		std::cout << " / " << string_to_hex(store->sid.toStdString());
+	std::cout << " type '"
 		<< qPrintable(store->type) << "'";
+
+	if (!credentials.isEmpty())
+		std::cout << " with '" << qPrintable(credentials) << "'";
 
 	if (!store->options.isEmpty())
 		std::cout << " (" << qPrintable(store->options) << ")";
@@ -43,18 +66,31 @@ static void printStore(const Mounts::Store *store, bool automatic)
 	std::cout << "\n";
 }
 
-static void printStores(void)
+static void printStores(FSTab &fstab, int verbosity)
 {
-	Mounts stores;
-	FSTab fstab;
+	Mounts mounts;
 
-	if (!fstab.load()) {
-		std::cerr << "error: could not load 'sys:fstab'!\n";
-		return;
+	QList<Mounts::Store*> stores = verbosity >= 1 ? mounts.allStores()
+		: mounts.regularStores();
+	foreach (Mounts::Store *store, stores)
+		printStore(store, fstab.autoMounted(store->label), verbosity >= 2);
+
+	if (verbosity >= 1) {
+		QSet<QString> unmounted = QSet<QString>::fromList(fstab.knownLabels());
+		foreach (Mounts::Store *s, mounts.allStores())
+			unmounted -= s->label;
+
+		std::cout << "\nUnmounted stores:\n";
+		Mounts::Store store;
+		foreach (QString label, unmounted) {
+			store.src = fstab.src(label);
+			store.type = fstab.type(label);
+			store.label = label;
+			store.options = fstab.options(label);
+			QString credentials = fstab.credentials(label);
+			printStore(&store, fstab.autoMounted(label), false, credentials);
+		}
 	}
-
-	foreach(Mounts::Store *store, stores.allStores())
-		printStore(store, fstab.autoMounted(store->label));
 }
 
 int cmd_mount(const QStringList &cmdLine)
@@ -80,8 +116,8 @@ int cmd_mount(const QStringList &cmdLine)
 		.setHelp("Mount store automatically on startup (depends on '-p')");
 
 	parser.addOption("verbose", QStringList() << "-v" << "--verbose", false)
-		.setActionStoreTrue()
-		.setHelp("Verbose output");
+		.setActionCounter()
+		.setHelp("Increase output verbosity");
 
 	switch (parser.parseArgs(args)) {
 		case OptionParser::Aborted:
@@ -105,6 +141,92 @@ int cmd_mount(const QStringList &cmdLine)
 		return 1;
 	}
 
-	printStores();
+	FSTab fstab;
+	if (!fstab.load()) {
+		std::cerr << "error: could not load 'sys:fstab'!\n";
+		return 2;
+	}
+
+	int verbosity = parser.options()["verbose"].toInt();
+
+	if (parser.arguments().size() == 0) {
+		printStores(fstab, verbosity);
+		return 0;
+	}
+
+	QString type = "file";
+	QString options;
+	QString credentials;
+	QString label;
+	QString src;
+
+	if (parser.arguments().size() == 1) {
+		label = parser.arguments().at(0);
+		if (!fstab.knownLabels().contains(label)) {
+			std::cerr << "Label '" << qPrintable(label)
+				<< "' not found in fstab!\n";
+			return 1;
+		}
+
+		src = fstab.src(label);
+		type = fstab.type(label);
+		options = fstab.options(label);
+		credentials = fstab.credentials(label);
+	} else {
+		src = parser.arguments().at(0);
+		label = parser.arguments().at(1);
+	}
+
+	// command line overrides fstab/defaults
+	if (parser.options().contains("type"))
+		type = parser.options()["type"].toString();
+	if (parser.options().contains("options"))
+		options = parser.options()["options"].toString();
+	if (parser.options().contains("credentials"))
+		credentials = parser.options()["credentials"].toString();
+
+	// already in fstab?
+	bool persist = parser.options()["persist"].toBool();
+	if (persist && fstab.knownLabels().contains(label)) {
+		std::cerr << "Label '" << qPrintable(label)
+			<< "' already defined in fstab!\n";
+		return 1;
+	}
+
+	// try to mount
+	if (verbosity >= 1) {
+		QString msg = QString("Mounting '%1' as '%2' type '%3'").arg(src, label,
+			type);
+		if (!options.isEmpty())
+			msg += " (" + options + ")";
+		std::cout << qPrintable(msg) << "...\n";
+	}
+
+	int err;
+	DId sid = Mounts::mount(&err, src, label, type, options, credentials);
+	if (err) {
+		std::cerr << "Mount failed: " << err << "\n";
+		return 2;
+	}
+
+	// add to fstab if requested
+	if (persist) {
+		fstab.add(label, src, type, options, credentials);
+		if (parser.options()["auto"].toBool())
+			fstab.setAutoMounted(label, true);
+
+		if (!fstab.save()) {
+			std::cerr << "Fstab update failed!\n";
+			return 2;
+		}
+	}
+
+	if (verbosity >= 1) {
+		std::cout << "Mounted '" << qPrintable(label) << "'";
+		if (verbosity >= 2)
+			std::cout << " / "<< string_to_hex(sid.toStdString());
+		std::cout << "\n";
+	}
+
 	return 0;
 }

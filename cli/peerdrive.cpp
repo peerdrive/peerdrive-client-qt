@@ -33,21 +33,24 @@ struct cmd {
 
 static struct cmd commands[] = {
 	{ "mount", cmd_mount },
+	{ "umount", cmd_umount },
 };
 
-static void help()
-{
-	std::cerr <<
-		"PeerDrive command line utility\n"
-		"\n"
-		"USAGE: peerdrive [-h|--help] [--version] COMMAND [ARGS]\n"
-		"\n"
-		"The most commonly used peerdrive commands are:\n"
-		"    mount    List and/or mount stores\n"
-		"    umount   Unmount stores\n"
-		"\n"
-		"Use 'peerdrive COMMAND --help' for more information on a specific command.\n";
-}
+static const char *help =
+	"PeerDrive command line utility\n"
+	"\n"
+	"USAGE: peerdrive [-h|--help] [--version] COMMAND [ARGS]\n"
+	"\n"
+	"The most commonly used peerdrive commands are:\n"
+	//"    export     Export files/folders from PeerDrive\n"
+	//"    import     Import files/folders into PeerDrive\n"
+	//"    ls         List PeerDrive documents\n"
+	"    mount      List and/or mount stores\n"
+	//"    replicate  Replicate documents\n"
+	"    umount     Unmount stores\n"
+	//"    unlink     Remove document from a folder\n"
+	"\n"
+	"Use 'peerdrive COMMAND --help' for more information on a specific command.\n";
 
 int main(int argc, char** argv)
 {
@@ -55,12 +58,12 @@ int main(int argc, char** argv)
 	QStringList arguments(QCoreApplication::arguments());
 
 	if (arguments.size() < 2) {
-		help();
+		std::cerr << help;
 		return 1;
 	}
 
 	if (arguments.at(1) == "--help" || arguments.at(1) == "-h") {
-		help();
+		std::cout << help;
 		return 0;
 	} else if (arguments.at(1) == "--version") {
 		std::cout << "peerdrive cli version ?\n";
@@ -73,6 +76,6 @@ int main(int argc, char** argv)
 				return commands[i].fun(arguments);
 	}
 
-	help();
+	std::cerr << help;
 	return 1;
 }

@@ -845,12 +845,79 @@ QList<QString> FSTab::knownLabels() const
 	return fstab.keys();
 }
 
+bool FSTab::add(const QString &label, const QString &src, const QString &type,
+                const QString &options, const QString &credentials)
+{
+	if (fstab.contains(label))
+		return false;
+
+	fstab[label]["src"] = src;
+	if (type != "file")
+		fstab[label]["type"] = type;
+	if (!options.isEmpty())
+		fstab[label]["options"] = options;
+	if (!credentials.isEmpty())
+		fstab[label]["credentials"] = options;
+
+	return true;
+}
+
+bool FSTab::remove(const QString &label)
+{
+	if (fstab.contains(label))
+		return false;
+
+	fstab.remove(label);
+	return true;
+}
+
+QString FSTab::src(const QString &label) const
+{
+	if (!fstab.contains(label))
+		return QString();
+
+	return fstab.get(label).get("src").asString();
+}
+
+QString FSTab::type(const QString &label) const
+{
+	if (!fstab.contains(label))
+		return QString();
+
+	return fstab.get(label).get("type", QString("file")).asString();
+}
+
+QString FSTab::options(const QString &label) const
+{
+	if (!fstab.contains(label))
+		return QString();
+
+	return fstab.get(label).get("options", QString("")).asString();
+}
+
+QString FSTab::credentials(const QString &label) const
+{
+	if (!fstab.contains(label))
+		return QString();
+
+	return fstab.get(label).get("credentials", QString("")).asString();
+}
+
 bool FSTab::autoMounted(const QString &label) const
 {
 	if (!fstab.contains(label))
 		return false;
 
 	return fstab.get(label).get("auto", false).asBool();
+}
+
+bool FSTab::setAutoMounted(const QString &label, bool enable)
+{
+	if (!fstab.contains(label))
+		return false;
+
+	fstab[label]["auto"] = enable;
+	return true;
 }
 
 }

@@ -13,4 +13,5 @@ QMAKE_LFLAGS += -Wl,-gc-sections
 SOURCES += optparse.cpp
 SOURCES += peerdrive.cpp
 SOURCES += mount.cpp
+SOURCES += umount.cpp
 
