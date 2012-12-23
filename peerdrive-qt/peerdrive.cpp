@@ -28,27 +28,258 @@
 #define FLAG_IND	2
 #define FLAG_RSP	3
 
+//define TRACE_LEVEL 1
+
+#ifdef TRACE_LEVEL
+static const char *msg_names[] = {
+	"ERROR_MSG",
+	"INIT_MSG",
+	"ENUM_MSG",
+	"LOOKUP_DOC_MSG",
+	"LOOKUP_REV_MSG",
+	"STAT_MSG",
+	"PEEK_MSG",
+	"CREATE_MSG",
+	"FORK_MSG",
+	"UPDATE_MSG",
+	"RESUME_MSG",
+	"READ_MSG",
+	"TRUNC_MSG",
+	"WRITE_BUFFER_MSG",
+	"WRITE_COMMIT_MSG",
+	"GET_FLAGS_MSG",
+	"SET_FLAGS_MSG",
+	"GET_TYPE_MSG",
+	"SET_TYPE_MSG",
+	"GET_PARENTS_MSG",
+	"MERGE_MSG",
+	"REBASE_MSG",
+	"COMMIT_MSG",
+	"SUSPEND_MSG",
+	"CLOSE_MSG",
+	"WATCH_ADD_MSG",
+	"WATCH_REM_MSG",
+	"WATCH_PROGRESS_MSG",
+	"FORGET_MSG",
+	"DELETE_DOC_MSG",
+	"DELETE_REV_MSG",
+	"FORWARD_DOC_MSG",
+	"REPLICATE_DOC_MSG",
+	"REPLICATE_REV_MSG",
+	"MOUNT_MSG",
+	"UNMOUNT_MSG",
+	"GET_PATH_MSG",
+	"WATCH_MSG",
+	"PROGRESS_START_MSG",
+	"PROGRESS_MSG",
+	"PROGRESS_END_MSG",
+	"PROGRESS_QUERY_MSG",
+	"WALK_PATH_MSG",
+};
+#endif
+
 using namespace PeerDrive;
 
-Connection *Connection::m_instance = NULL;
-
-Connection::Connection() : QObject()
+ConnectionHandler::ConnectionHandler()
+	: QObject()
 {
-	m_nextRef = 0;
-	m_recursion = 0;
+	nextRef = 0;
 
-	m_socket.setSocketOption(QAbstractSocket::LowDelayOption, 1);
-	QObject::connect(&m_socket, SIGNAL(readyRead()), this, SLOT(readReady()));
-	QObject::connect(this, SIGNAL(watchReady()), this,
-		SLOT(dispatchIndications()), Qt::QueuedConnection);
+	QObject::connect(&socket, SIGNAL(readyRead()), this, SLOT(sockReadyRead()));
+	QObject::connect(&socket, SIGNAL(disconnected()), this, SLOT(sockDisconnected()));
+	QObject::connect(&socket, SIGNAL(error(QAbstractSocket::SocketError)),
+		this, SLOT(sockError(QAbstractSocket::SocketError)));
+	QObject::connect(this, SIGNAL(pushSendQueue()), this,
+		SLOT(sockReadySend()), Qt::QueuedConnection);
+}
+
+ConnectionHandler::~ConnectionHandler()
+{
+	while (socket.flush())
+		socket.waitForBytesWritten(1000);
+	socket.disconnectFromHost();
+
+	abortCompletions(ERR_ECONNRESET);
+}
+
+int ConnectionHandler::connect(const QString &hostName, quint16 port)
+{
+	socket.connectToHost(hostName, port);
+	if (!socket.waitForConnected())
+		return ERR_ENODEV;
+
+	return 0;
+}
+
+void ConnectionHandler::disconnect()
+{
+	socket.disconnectFromHost();
+}
+
+int ConnectionHandler::sendReq(int msg, Completion *completion, const QByteArray &req)
+{
+	completion->done = false;
+	completion->err = 0;
+
+	QMutexLocker locker(&mutex);
+
+	if (socket.state() != QAbstractSocket::ConnectedState)
+		return ERR_ECONNRESET;
+
+	quint32 ref = nextRef++;
+	pendingCompletions.insert(ref, completion);
+
+	uchar header[8];
+	qToBigEndian((quint16)(6 + req.size()), header);
+	qToBigEndian((quint32)ref, header + 2);
+	qToBigEndian((quint16)((msg << 4) | FLAG_REQ), header + 6);
+
+	QByteArray fullReq((const char *)header, 8);
+	fullReq.append(req);
+
+	sendQueue.enqueue(fullReq);
+
+	locker.unlock();
+	emit pushSendQueue();
+
+	return 0;
+}
+
+int ConnectionHandler::poll(Completion *completion)
+{
+	QMutexLocker locker(&mutex);
+
+	// FIXME: use a pool of QWaitCondition's or pre-allocated Completion's
+	// with their own semaphore
+	while (!completion->done)
+		gotConfirmation.wait(&mutex);
+
+	return completion->err;
+}
+
+void ConnectionHandler::sockReadySend()
+{
+	QMutexLocker locker(&mutex);
+
+	while (!sendQueue.isEmpty()) {
+		QByteArray req = sendQueue.dequeue();
+		locker.unlock();
+		if (socket.write(req) != req.size()) {
+			socket.disconnectFromHost();
+			abortCompletions(ERR_ECONNRESET);
+			return;
+		}
+		locker.relock();
+	}
+}
+
+void ConnectionHandler::sockReadyRead()
+{
+	m_buf.append(socket.readAll());
+	while (m_buf.size() > 2) {
+		quint16 expect = qFromBigEndian<quint16>((const uchar *)m_buf.constData());
+		if (expect+2 > m_buf.size())
+			break;
+
+		quint32 ref = qFromBigEndian<quint32>((const uchar *)m_buf.constData() + 2);
+		quint16 msg = qFromBigEndian<quint16>((const uchar *)m_buf.constData() + 6);
+		int type = msg & 3;
+		int len = expect-6;
+		msg >>= 4;
+
+		QMutexLocker locker(&mutex);
+
+		if (type == FLAG_CNF && pendingCompletions.contains(ref)) {
+			Completion *c = pendingCompletions.take(ref);
+			c->done = true;
+			c->msg = msg;
+			*(c->cnf) = m_buf.mid(8, len);
+			gotConfirmation.wakeAll();
+		} else if (type == FLAG_IND) {
+			// dispatch with message header
+			emit indication(m_buf.mid(6, len+2));
+		}
+
+		m_buf.remove(0, expect+2);
+	}
+}
+
+void ConnectionHandler::sockDisconnected()
+{
+	abortCompletions(ERR_ECONNRESET);
+}
+
+void ConnectionHandler::sockError(QAbstractSocket::SocketError /*socketError*/)
+{
+	socket.disconnectFromHost();
+	abortCompletions(ERR_ECONNRESET); // TODO: use socketError
+}
+
+void ConnectionHandler::abortCompletions(int err)
+{
+	QMutexLocker locker(&mutex);
+
+	foreach (Completion *c, pendingCompletions) {
+		c->done = true;
+		c->err = err;
+	}
+
+	gotConfirmation.wakeAll();
+}
+
+/****************************************************************************/
+
+volatile Connection *Connection::m_instance = NULL;
+QMutex Connection::instanceMutex;
+
+Connection::Connection()
+	: QThread(),
+	  m_maxPacketSize(16384)
+{
+	QMutexLocker locker(&startupMutex);
+
+	start();
+	startupDone.wait(&startupMutex);
+
+	sendInit();
+
+	Connection::m_instance = this;
+}
+
+Connection::~Connection()
+{
+	Connection::m_instance = NULL;
+
+	exit();
+	wait();
+}
+
+Connection* Connection::instance()
+{
+	// fast path: instance already created
+	if (Connection::m_instance)
+		return const_cast<Connection*>(Connection::m_instance);
+
+	// slow path: create instance
+	QMutexLocker l(&instanceMutex);
+
+	if (Connection::m_instance)
+		return const_cast<Connection*>(Connection::m_instance);
+
+	return new Connection();
+}
+
+void Connection::run()
+{
+	handler = new ConnectionHandler();
+	QObject::connect(handler, SIGNAL(indication(QByteArray)), this,
+		SLOT(dispatchIndication(QByteArray)), Qt::QueuedConnection);
+
+	QString hostName = "127.0.0.1";
+	quint16 port = 4567;
 
 	QString address = QProcessEnvironment::systemEnvironment().value("PEERDRIVE");
-	if (address.isEmpty()) {
-		connect();
-	} else {
-		QString hostName = "127.0.0.1";
-		quint16 port = 4567;
-
+	if (!address.isEmpty()) {
 		QStringList addrParts = address.split(":");
 		switch (addrParts.size()) {
 			case 2:
@@ -57,37 +288,20 @@ Connection::Connection() : QObject()
 			case 1:
 				hostName = addrParts.at(0);
 				/* fall through */
-			default:
-				connect(hostName, port);
 		}
 	}
-	Connection::m_instance = this;
+
+	int err = handler->connect(hostName, port);
+	if (err)
+		qDebug() << "::PeerDrive::Connection: connection failed:" << err;
+
+	startupDone.wakeAll();
+	exec();
+	delete handler;
 }
 
-Connection::~Connection()
+void Connection::sendInit()
 {
-	while (m_socket.flush())
-		m_socket.waitForBytesWritten(1000);
-	m_socket.disconnectFromHost();
-
-	if (Connection::m_instance == this)
-		Connection::m_instance = NULL;
-}
-
-Connection* Connection::instance()
-{
-	if (Connection::m_instance)
-		return Connection::m_instance;
-
-	return new Connection();
-}
-
-int Connection::connect(const QString &hostName, quint16 port)
-{
-	m_socket.connectToHost(hostName, port);
-	if (!m_socket.waitForConnected(1000))
-		return ERR_ENODEV;
-
 	InitReq req;
 	InitCnf cnf;
 	QByteArray rawReq, rawCnf;
@@ -117,18 +331,17 @@ int Connection::connect(const QString &hostName, quint16 port)
 	}
 
 	m_maxPacketSize = cnf.max_packet_size();
-	return 0;
+	return;
 
 failed:
-	m_socket.disconnectFromHost();
-	return err;
+	handler->disconnect();
 }
 
 int Connection::rpc(int msg, const QByteArray &req, QByteArray &cnf)
 {
 	cnf.clear();
 
-	Completion completion;
+	ConnectionHandler::Completion completion;
 	completion.cnf = &cnf;
 
 	return _rpc(msg, req, &completion);
@@ -138,29 +351,25 @@ int Connection::rpc(int msg, const QByteArray &req)
 {
 	QByteArray cnf;
 
-	Completion completion;
+	ConnectionHandler::Completion completion;
 	completion.cnf = &cnf;
 
 	return _rpc(msg, req, &completion);
 }
 
-int Connection::_rpc(int msg, const QByteArray &req, Completion *completion)
+int Connection::_rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion)
 {
-	quint32 ref = m_nextRef++;
-	completion->done = false;
-	m_confirmations.insert(ref, completion);
+#if TRACE_LEVEL >= 1
+	qDebug() << msg_names[msg];
+#endif
 
-	int ret = send(ref, (msg << 4) | FLAG_REQ, req);
-	if (ret) {
-		m_confirmations.remove(ref);
+	int ret = handler->sendReq(msg, completion, req);
+	if (ret)
 		return ret;
-	}
 
-	ret = poll(completion);
-	if (ret) {
-		m_confirmations.remove(ref);
+	ret = handler->poll(completion);
+	if (ret)
 		return ret;
-	}
 
 	if (completion->msg == msg) {
 		return 0;
@@ -174,92 +383,20 @@ int Connection::_rpc(int msg, const QByteArray &req, Completion *completion)
 		return ERR_EBADRPC;
 }
 
-int Connection::send(quint32 ref, int msg, const QByteArray &req)
+void Connection::dispatchIndication(const QByteArray &buf)
 {
-	int len = 6 + req.size();
-
-	uchar header[8];
-	qToBigEndian((quint16)len, header);
-	qToBigEndian((quint32)ref, header + 2);
-	qToBigEndian((quint16)msg, header + 6);
-
-	QByteArray fullReq((const char *)header, 8);
-	fullReq.append(req);
-
-	return m_socket.write(fullReq) == -1 ? ERR_ECONNRESET : 0;
-}
-
-int Connection::poll(Completion *completion)
-{
-	int ret = 0;
-
-	m_recursion++;
-
-	while (!completion->done) {
-		if (!m_socket.waitForReadyRead(-1)) {
-			ret = ERR_ECONNRESET;
-			goto out;
-		}
-		readReady();
-	}
-
-out:
-	m_recursion--;
-	return ret;
-}
-
-void Connection::readReady()
-{
-	m_buf.append(m_socket.readAll());
-	while (m_buf.size() > 2) {
-		quint16 expect = qFromBigEndian<quint16>((const uchar *)m_buf.constData());
-		if (expect+2 > m_buf.size())
+	quint16 msg = qFromBigEndian<quint16>((const uchar *)buf.constData()) >> 4;
+	switch (msg) {
+		case WATCH_MSG:
+			dispatchWatch(buf.mid(2));
 			break;
-
-		quint32 ref = qFromBigEndian<quint32>((const uchar *)m_buf.constData() + 2);
-		quint16 msg = qFromBigEndian<quint16>((const uchar *)m_buf.constData() + 6);
-		int type = msg & 3;
-		int len = expect-6;
-		msg >>= 4;
-
-		if (type == FLAG_CNF && m_confirmations.contains(ref)) {
-			Completion *c = m_confirmations[ref];
-			c->done = true;
-			c->msg = msg;
-			*(c->cnf) = m_buf.mid(8, len);
-		} else if (type == FLAG_IND) {
-			// queue indication with message header
-			m_indications.append(m_buf.mid(6, len+2));
-		}
-
-		m_buf.remove(0, expect+2);
-	}
-
-	if (!m_indications.isEmpty())
-		dispatchIndications();
-}
-
-void Connection::dispatchIndications()
-{
-	if (m_recursion > 0) {
-		emit watchReady();
-		return;
-	}
-
-	while (!m_indications.isEmpty()) {
-		QByteArray buf = m_indications.takeFirst();
-
-		quint16 msg = qFromBigEndian<quint16>((const uchar *)buf.constData()) >> 4;
-		switch (msg) {
-			case WATCH_MSG:
-				dispatchWatch(buf.mid(2));
-				break;
-		}
 	}
 }
 
-void Connection::dispatchWatch(QByteArray packet)
+void Connection::dispatchWatch(const QByteArray &packet)
 {
+	QMutexLocker lock(&watchMutex);
+
 	WatchInd ind;
 	if (!ind.ParseFromArray(packet.constData(), packet.size()))
 		return;
@@ -286,6 +423,7 @@ void Connection::dispatchWatch(QByteArray packet)
 
 int Connection::addWatch(Watch *watch, const DId &doc)
 {
+	QMutexLocker lock(&watchMutex);
 	int err = 0;
 
 	if (m_docWatches.contains(doc)) {
@@ -312,6 +450,7 @@ int Connection::addWatch(Watch *watch, const DId &doc)
 
 int Connection::addWatch(Watch *watch, const RId &rev)
 {
+	QMutexLocker lock(&watchMutex);
 	int err = 0;
 
 	if (m_revWatches.contains(rev)) {
@@ -338,6 +477,7 @@ int Connection::addWatch(Watch *watch, const RId &rev)
 
 void Connection::delWatch(Watch *watch, const DId &doc)
 {
+	QMutexLocker lock(&watchMutex);
 	QList<Watch*> &watches = m_docWatches[doc];
 	watches.removeAll(watch);
 
@@ -360,6 +500,7 @@ void Connection::delWatch(Watch *watch, const DId &doc)
 
 void Connection::delWatch(Watch *watch, const RId &rev)
 {
+	QMutexLocker lock(&watchMutex);
 	QList<Watch*> &watches = m_revWatches[rev];
 	watches.removeAll(watch);
 
@@ -540,6 +681,14 @@ QString Link::getOsPath() const
 		return QString();
 
 	return QString::fromUtf8(cnf.path().c_str());
+}
+
+uint qHash(const PeerDrive::Link &link)
+{
+	return qHash(link.m_store.toByteArray()) ^
+		qHash(link.m_rev.toByteArray()) ^
+		qHash(link.m_doc.toByteArray()) ^
+		link.m_state;
 }
 
 /****************************************************************************/
@@ -1225,9 +1374,28 @@ bool Document::resize(const Part &part, qint64 size)
 	return true;
 }
 
+QString Document::type() const
+{
+	if (!m_open)
+		return QString();
+
+	if (!m_type.isNull())
+		return m_type;
+
+	GetTypeReq req;
+	GetTypeCnf cnf;
+	req.set_handle(m_handle);
+
+	int error = Connection::defaultRPC<GetTypeReq, GetTypeCnf>(GET_TYPE_MSG, req, cnf);
+	if (error)
+		return QString();
+
+	m_type = QString::fromUtf8(cnf.type_code().c_str());
+	return m_type;
+}
+
 //unsigned int Document::flags() const;
 //bool Document::setFlags(unsigned int flags);
-//QString Document::type() const;
 //bool Document::setType(const QString &type);
 //QList<Link> Document::parents() const;
 //bool Document::merge(const Link &rev, QDateTime depth=QDateTime(), bool verbose=false);
@@ -1245,6 +1413,7 @@ void Document::close()
 
 	m_open = false;
 	m_pos.clear();
+	m_type = QString();
 
 	CloseReq req;
 	req.set_handle(m_handle);

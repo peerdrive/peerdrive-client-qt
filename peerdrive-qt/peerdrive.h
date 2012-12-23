@@ -27,6 +27,12 @@
 #include <string>
 
 namespace PeerDrive {
+	class Link;
+}
+
+uint qHash(const PeerDrive::Link&);
+
+namespace PeerDrive {
 
 class EnumCnf_Store;
 
@@ -134,6 +140,8 @@ protected:
 	DId m_store;
 	RId m_rev;
 	DId m_doc;
+
+	friend uint ::qHash(const Link&);
 };
 
 class Watch : public QObject {
@@ -332,9 +340,8 @@ private:
 	int m_error;
 	Link m_link;
 	QMap<Part, qint64> m_pos;
+	mutable QString m_type;
 };
-
-
 
 }
 

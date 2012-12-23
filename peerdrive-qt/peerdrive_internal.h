@@ -19,9 +19,12 @@
 #define _PEERDRIVE_INTERNAL_H_
 
 #include <QByteArray>
-#include <QLinkedList>
 #include <QMap>
+#include <QMutex>
+#include <QQueue>
 #include <QTcpSocket>
+#include <QThread>
+#include <QWaitCondition>
 
 #include "peerdrive.h"
 #include "peerdrive_client.pb.h"
@@ -74,14 +77,55 @@ namespace PeerDrive {
 
 class Watch;
 
-class Connection : public QObject
+class ConnectionHandler : public QObject
 {
 	Q_OBJECT
 
 public:
-	Connection();
-	virtual ~Connection();
+	ConnectionHandler();
+	~ConnectionHandler();
 
+	int connect(const QString &hostName, quint16 port);
+	void disconnect();
+
+	struct Completion {
+		volatile bool done;
+		volatile int err;
+		int msg;
+		QByteArray *cnf;
+	};
+
+	int sendReq(int msg, Completion *completion, const QByteArray &req);
+	int poll(Completion *completion);
+
+signals:
+	void pushSendQueue();
+	void indication(const QByteArray &ind);
+
+private slots:
+	void sockReadyRead();
+	void sockReadySend();
+	void sockDisconnected();
+	void sockError(QAbstractSocket::SocketError socketError);
+
+private:
+	void abortCompletions(int err);
+
+	QTcpSocket socket;
+	QQueue<QByteArray> sendQueue;
+	QMap<quint32, Completion*> pendingCompletions;
+	quint32 nextRef;
+	QByteArray m_buf;
+
+	QMutex mutex;
+	QWaitCondition gotConfirmation;
+};
+
+class Connection : public QThread
+{
+	Q_OBJECT
+
+public:
 	int rpc(int msg, const QByteArray &req);
 	int rpc(int msg, const QByteArray &req, QByteArray &cnf);
 	static Connection *instance();
@@ -124,38 +168,30 @@ public:
 	unsigned int maxPacketSize() { return m_maxPacketSize; }
 
 protected:
-	struct Completion {
-		bool done;
-		int msg;
-		QByteArray *cnf;
-	};
+	int _rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion);
+	void run();
 
-	int connect(const QString &hostName = "127.0.0.1", quint16 port = 4567);
-	int send(quint32 ref, int msg, const QByteArray &req);
-	int _rpc(int msg, const QByteArray &req, Completion *completion);
 
 private slots:
-	void readReady();
-	void dispatchIndications();
-	void dispatchWatch(QByteArray packet);
-
-signals:
-	void watchReady();
+	void dispatchIndication(const QByteArray &packet);
+	void dispatchWatch(const QByteArray &packet);
 
 private:
-	int poll(Completion *completion);
+	Connection();
+	~Connection();
+	void sendInit();
 
-	QTcpSocket m_socket;
-	quint32 m_nextRef;
-	QMap<quint32, Completion*> m_confirmations;
 	QMap<DId, QList<Watch*> > m_docWatches;
 	QMap<RId, QList<Watch*> > m_revWatches;
-	QLinkedList<QByteArray> m_indications;
-	int m_recursion;
-	QByteArray m_buf;
+	QMutex watchMutex;
+
+	QMutex startupMutex;
+	QWaitCondition startupDone;
+	ConnectionHandler *handler;
 	unsigned int m_maxPacketSize;
 
-	static Connection *m_instance;
+	static QMutex instanceMutex;
+	volatile static Connection *m_instance;
 };
 
 }
