@@ -147,13 +147,13 @@ signals:
 	void modified();
 
 private slots:
-	void fsTabModified();
+	void fsTabModified(const Link & item);
 
 private:
 	bool reload;
 	Document *file;
 	Value fstab;
-	Watch watch;
+	LinkWatcher watch;
 };
 
 }

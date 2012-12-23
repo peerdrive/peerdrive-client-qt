@@ -767,7 +767,7 @@ FSTab::FSTab(bool autoReload) : QObject()
 {
 	reload = autoReload;
 	file = NULL;
-	QObject::connect(&watch, SIGNAL(modified()), this, SLOT(fsTabModified()));
+	QObject::connect(&watch, SIGNAL(modified(Link)), this, SLOT(fsTabModified(Link)));
 }
 
 FSTab::~FSTab()
@@ -776,8 +776,11 @@ FSTab::~FSTab()
 		delete file;
 }
 
-void FSTab::fsTabModified()
+void FSTab::fsTabModified(const Link & item)
 {
+	if (item.store() != file->link().store())
+		return;
+
 	if (reload)
 		load();
 
@@ -792,7 +795,7 @@ bool FSTab::load()
 		if (!link.isValid())
 			return false;
 
-		watch.watch(link);
+		watch.addWatch(link);
 		file = new Document(link);
 	} else {
 		// reset to HEAD

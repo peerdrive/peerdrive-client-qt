@@ -144,15 +144,15 @@ protected:
 	friend uint ::qHash(const Link&);
 };
 
-class Watch : public QObject {
+class LinkWatcher : public QObject {
 	Q_OBJECT
 
 public:
-	Watch();
-	virtual ~Watch();
+	LinkWatcher();
+	virtual ~LinkWatcher();
 
-	void watch(const Link &item);
-	void clear();
+	void addWatch(const Link &item);
+	void removeWatch(const Link &item);
 
 	enum Distribution {
 		APPEARED,
@@ -162,19 +162,18 @@ public:
 	};
 
 signals:
-	void modified();
-	void appeared();
-	void replicated();
-	void diminished();
-	void disappeared();
-	void distributionChanged(Distribution how);
+	void modified(const Link &item);
+	void appeared(const Link &item);
+	void replicated(const Link &item);
+	void diminished(const Link &item);
+	void disappeared(const Link &item);
+	void distributionChanged(const Link &item, Distribution how);
 
 private:
-	void dispatch(int event);
+	void dispatch(const Link &item, int event);
 	friend class Connection;
 
-	bool m_watching;
-	Link m_link;
+	QList<Link> watchedLinks;
 };
 
 class Mounts {

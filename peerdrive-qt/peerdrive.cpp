@@ -28,7 +28,7 @@
 #define FLAG_IND	2
 #define FLAG_RSP	3
 
-//define TRACE_LEVEL 1
+//#define TRACE_LEVEL 1
 
 #ifdef TRACE_LEVEL
 static const char *msg_names[] = {
@@ -405,23 +405,25 @@ void Connection::dispatchWatch(const QByteArray &packet)
 		case WatchInd::DOC:
 		{
 			DId doc(ind.element());
+			Link item(DId(ind.store()), doc, false);
 			if (m_docWatches.contains(doc))
-				foreach (Watch *w, m_docWatches.value(doc))
-					w->dispatch(ind.event());
+				foreach (LinkWatcher *w, m_docWatches.value(doc))
+					w->dispatch(item, ind.event());
 			break;
 		}
 		case WatchInd::REV:
 		{
 			RId rev(ind.element());
+			Link item(DId(ind.store()), rev);
 			if (m_revWatches.contains(rev))
-				foreach (Watch *w, m_revWatches.value(rev))
-					w->dispatch(ind.event());
+				foreach (LinkWatcher *w, m_revWatches.value(rev))
+					w->dispatch(item, ind.event());
 			break;
 		}
 	}
 }
 
-int Connection::addWatch(Watch *watch, const DId &doc)
+int Connection::addWatch(LinkWatcher *watch, const DId &doc)
 {
 	QMutexLocker lock(&watchMutex);
 	int err = 0;
@@ -448,7 +450,7 @@ int Connection::addWatch(Watch *watch, const DId &doc)
 	return err;
 }
 
-int Connection::addWatch(Watch *watch, const RId &rev)
+int Connection::addWatch(LinkWatcher *watch, const RId &rev)
 {
 	QMutexLocker lock(&watchMutex);
 	int err = 0;
@@ -475,11 +477,11 @@ int Connection::addWatch(Watch *watch, const RId &rev)
 	return err;
 }
 
-void Connection::delWatch(Watch *watch, const DId &doc)
+void Connection::delWatch(LinkWatcher *watch, const DId &doc)
 {
 	QMutexLocker lock(&watchMutex);
-	QList<Watch*> &watches = m_docWatches[doc];
-	watches.removeAll(watch);
+	QList<LinkWatcher*> &watches = m_docWatches[doc];
+	watches.removeOne(watch);
 
 	if (watches.isEmpty()) {
 		WatchRemReq req;
@@ -498,11 +500,11 @@ void Connection::delWatch(Watch *watch, const DId &doc)
 	}
 }
 
-void Connection::delWatch(Watch *watch, const RId &rev)
+void Connection::delWatch(LinkWatcher *watch, const RId &rev)
 {
 	QMutexLocker lock(&watchMutex);
-	QList<Watch*> &watches = m_revWatches[rev];
-	watches.removeAll(watch);
+	QList<LinkWatcher*> &watches = m_revWatches[rev];
+	watches.removeOne(watch);
 
 	if (watches.isEmpty()) {
 		WatchRemReq req;
@@ -693,65 +695,69 @@ uint qHash(const PeerDrive::Link &link)
 
 /****************************************************************************/
 
-Watch::Watch() : QObject()
+LinkWatcher::LinkWatcher()
+	: QObject()
 {
-	m_watching = false;
 }
 
-Watch::~Watch()
+LinkWatcher::~LinkWatcher()
 {
-	clear();
+	foreach (const Link &item, watchedLinks)
+		removeWatch(item);
 }
 
-void Watch::watch(const Link &item)
+void LinkWatcher::addWatch(const Link &item)
 {
-	clear();
 	if (!item.isValid())
 		return;
+	if (watchedLinks.contains(item))
+		return;
 
-	m_link = item;
-	if (item.isDocLink()) {
-		if (Connection::instance()->addWatch(this, item.doc()) == 0)
-			m_watching = true;
-	} else {
-		if (Connection::instance()->addWatch(this, item.rev()) == 0)
-			m_watching = true;
-	}
+	bool added;
+	if (item.isDocLink())
+		added = Connection::instance()->addWatch(this, item.doc()) == 0;
+	else
+		added = Connection::instance()->addWatch(this, item.rev()) == 0;
+
+	if (added)
+		watchedLinks.append(item);
 }
 
-void Watch::clear()
+void LinkWatcher::removeWatch(const Link &item)
 {
-	if (m_watching) {
-		if (m_link.isDocLink())
-			Connection::instance()->delWatch(this, m_link.doc());
-		else
-			Connection::instance()->delWatch(this, m_link.rev());
+	if (!item.isValid())
+		return;
+	if (!watchedLinks.contains(item))
+		return;
 
-		m_watching = false;
-	}
+	watchedLinks.removeAll(item);
+	if (item.isDocLink())
+		Connection::instance()->delWatch(this, item.doc());
+	else
+		Connection::instance()->delWatch(this, item.rev());
 }
 
-void Watch::dispatch(int event)
+void LinkWatcher::dispatch(const Link &item, int event)
 {
 	switch (event) {
 		case WatchInd::MODIFIED:
-			emit modified();
+			emit modified(item);
 			break;
 		case WatchInd::APPEARED:
-			emit appeared();
-			emit distributionChanged(APPEARED);
+			emit appeared(item);
+			emit distributionChanged(item, APPEARED);
 			break;
 		case WatchInd::REPLICATED:
-			emit replicated();
-			emit distributionChanged(REPLICATED);
+			emit replicated(item);
+			emit distributionChanged(item, REPLICATED);
 			break;
 		case WatchInd::DIMINISHED:
-			emit diminished();
-			emit distributionChanged(DIMINISHED);
+			emit diminished(item);
+			emit distributionChanged(item, DIMINISHED);
 			break;
 		case WatchInd::DISAPPEARED:
-			emit disappeared();
-			emit distributionChanged(DISAPPEARED);
+			emit disappeared(item);
+			emit distributionChanged(item, DISAPPEARED);
 			break;
 	}
 }

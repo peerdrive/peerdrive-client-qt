@@ -75,7 +75,7 @@
 
 namespace PeerDrive {
 
-class Watch;
+class LinkWatcher;
 
 class ConnectionHandler : public QObject
 {
@@ -160,10 +160,10 @@ public:
 		return Connection::instance()->rpc(msg, rawReq);
 	}
 
-	int addWatch(Watch *watch, const DId &doc);
-	int addWatch(Watch *watch, const RId &rev);
-	void delWatch(Watch *watch, const DId &doc);
-	void delWatch(Watch *watch, const RId &rev);
+	int addWatch(LinkWatcher *watch, const DId &doc);
+	int addWatch(LinkWatcher *watch, const RId &rev);
+	void delWatch(LinkWatcher *watch, const DId &doc);
+	void delWatch(LinkWatcher *watch, const RId &rev);
 
 	unsigned int maxPacketSize() { return m_maxPacketSize; }
 
@@ -181,8 +181,8 @@ private:
 	~Connection();
 	void sendInit();
 
-	QMap<DId, QList<Watch*> > m_docWatches;
-	QMap<RId, QList<Watch*> > m_revWatches;
+	QMap<DId, QList<LinkWatcher*> > m_docWatches;
+	QMap<RId, QList<LinkWatcher*> > m_revWatches;
 	QMutex watchMutex;
 
 	QMutex startupMutex;
