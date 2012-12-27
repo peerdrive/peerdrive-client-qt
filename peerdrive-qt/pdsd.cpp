@@ -17,6 +17,7 @@
  */
 
 #include <QtEndian>
+#include <stdexcept>
 
 #include "pdsd.h"
 #include "peerdrive_internal.h"
@@ -921,6 +922,104 @@ bool FSTab::setAutoMounted(const QString &label, bool enable)
 
 	fstab[label]["auto"] = enable;
 	return true;
+}
+
+/****************************************************************************/
+
+QMutex Registry::mutex;
+Registry* volatile Registry::singleton = NULL;
+
+Registry& Registry::instance()
+{
+	if (singleton)
+		return *singleton;
+
+	QMutexLocker locker(&mutex);
+
+	if (!singleton)
+		singleton = new Registry();
+
+	return *singleton;
+}
+
+Registry::Registry()
+	: QObject()
+{
+	QObject::connect(&watch, SIGNAL(modified(Link)), this, SLOT(modified(Link)));
+
+	link = Folder::lookupSingle("sys:registry");
+	if (!link.isValid())
+		throw std::runtime_error("Registry not found");
+
+	watch.addWatch(link);
+
+	modified(link);
+}
+
+void Registry::modified(const Link &item)
+{
+	if (item.store() != link.store())
+		return;
+
+	Document file(item);
+	if (!file.peek()) {
+		qDebug() << "PeerDrive::Registry: cannot read registry!";
+		return;
+	}
+
+	try {
+		QByteArray tmp;
+		if (file.readAll(Part::PDSD, tmp) >= 0)
+			registry = Value::fromByteArray(tmp, item.store());
+		else
+			qDebug() << "PeerDrive::Registry: no data?";
+	} catch (ValueError&) {
+			qDebug() << "PeerDrive::Registry: invalid data!";
+	}
+
+	file.close();
+}
+
+Value Registry::search(const QString &uti, const QString &key, bool recursive,
+                       const Value &defVal) const
+{
+	if (!registry.contains(uti))
+		return defVal;
+
+	const Value &item = registry[uti];
+	if (item.contains(key))
+		return item[key];
+	else if (!recursive)
+		return defVal;
+	else if (!item.contains("conforming"))
+		return defVal;
+
+	// try to search recursive
+	const Value &conforming = item["conforming"];
+	for (int i = 0; i < conforming.size(); i++) {
+		Value result = search(conforming[i].asString(), key);
+		if (result.type() != Value::NUL)
+			return result;
+	}
+
+	// nothing found
+	return defVal;
+}
+
+bool Registry::conformes(const QString &uti, const QString &superClass) const
+{
+	if (uti == superClass)
+		return true;
+
+	if (!registry.contains(uti))
+		return false;
+
+	Value conforming = registry[uti].get("conforming", Value(Value::LIST));
+	for (int i = 0; i < conforming.size(); i++)
+		if (conformes(conforming[i].asString(), superClass))
+			return true;
+
+	return false;
 }
 
 }

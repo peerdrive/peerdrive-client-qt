@@ -26,6 +26,8 @@
 
 #include "peerdrive.h"
 
+class QMutex;
+
 namespace PeerDrive {
 
 class ValueError
@@ -66,6 +68,7 @@ public:
 	Value &operator=( const Value &other );
 
 	Type type() const;
+	inline bool isNull() { return type() == NUL; }
 
 	QString asString() const;
 	int asInt() const;
@@ -153,6 +156,33 @@ private:
 	bool reload;
 	Document *file;
 	Value fstab;
+	LinkWatcher watch;
+};
+
+class Registry : public QObject
+{
+	Q_OBJECT
+
+public:
+	static Registry& instance();
+
+	Value search(const QString &uti, const QString &key, bool recursive = true,
+		const Value &defVal = Value()) const;
+	bool conformes(const QString &uti, const QString &superClass) const;
+
+private slots:
+	void modified(const Link &item);
+
+private:
+	Registry();
+	Registry(const Registry &) : QObject() { }
+	~Registry() { }
+
+	static QMutex mutex;
+	static Registry* volatile singleton;
+
+	Link link;
+	Value registry;
 	LinkWatcher watch;
 };
 
