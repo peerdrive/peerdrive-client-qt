@@ -229,7 +229,7 @@ void ConnectionHandler::abortCompletions(int err)
 
 /****************************************************************************/
 
-volatile Connection *Connection::m_instance = NULL;
+Connection* volatile Connection::m_instance = NULL;
 QMutex Connection::instanceMutex;
 
 Connection::Connection()
@@ -258,13 +258,13 @@ Connection* Connection::instance()
 {
 	// fast path: instance already created
 	if (Connection::m_instance)
-		return const_cast<Connection*>(Connection::m_instance);
+		return Connection::m_instance;
 
 	// slow path: create instance
 	QMutexLocker l(&instanceMutex);
 
 	if (Connection::m_instance)
-		return const_cast<Connection*>(Connection::m_instance);
+		return Connection::m_instance;
 
 	return new Connection();
 }
@@ -405,7 +405,7 @@ void Connection::dispatchWatch(const QByteArray &packet)
 		case WatchInd::DOC:
 		{
 			DId doc(ind.element());
-			Link item(DId(ind.store()), doc, false);
+			Link item(DId(ind.store()), doc);
 			if (m_docWatches.contains(doc))
 				foreach (LinkWatcher *w, m_docWatches.value(doc))
 					w->dispatch(item, ind.event());
@@ -929,11 +929,76 @@ void RevInfo::fetch(const RId &rid, const QList<DId> *stores)
 		RId rid(cnf.parents(j));
 		m_parents.append(rid);
 	}
-	m_mtime.setTime_t(cnf.mtime() / 1000000);
+	m_mtime.setTime_t(cnf.mtime() / 1000000); // FIXME: sub-second resolution
 	m_type = QString::fromUtf8(cnf.type_code().c_str());
 	m_creator = QString::fromUtf8(cnf.creator_code().c_str());
 	m_comment = QString::fromUtf8(cnf.comment().c_str());
 	m_exists = true;
+}
+
+bool RevInfo::exists() const
+{
+	return m_exists;
+}
+
+int RevInfo::error() const
+{
+	return m_error;
+}
+
+int RevInfo::flags() const
+{
+	return m_flags;
+}
+
+quint64 RevInfo::size() const
+{
+	quint64 sum;
+	for (QMap<Part, quint64>::const_iterator i = m_partSizes.constBegin();
+	     i != m_partSizes.constEnd(); i++)
+		sum += i.value();
+
+	return sum;
+}
+
+quint64 RevInfo::size(const Part &part) const
+{
+	return m_partSizes[part];
+}
+
+PId RevInfo::hash(const Part &part) const
+{
+	return m_partHashes[part];
+}
+
+QList<Part> RevInfo::parts() const
+{
+	return m_partSizes.keys();
+}
+
+QList<RId> RevInfo::parents() const
+{
+	return m_parents;
+}
+
+QDateTime RevInfo::mtime() const
+{
+	return m_mtime;
+}
+
+QString RevInfo::type() const
+{
+	return m_type;
+}
+
+QString RevInfo::creator() const
+{
+	return m_creator;
+}
+
+QString RevInfo::comment() const
+{
+	return m_comment;
 }
 
 /****************************************************************************/

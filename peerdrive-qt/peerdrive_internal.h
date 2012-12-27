@@ -191,7 +191,7 @@ private:
 	unsigned int m_maxPacketSize;
 
 	static QMutex instanceMutex;
-	volatile static Connection *m_instance;
+	static Connection* volatile m_instance;
 };
 
 }

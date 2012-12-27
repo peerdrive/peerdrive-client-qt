@@ -213,23 +213,21 @@ public:
 	RevInfo();
 	RevInfo(const RId &rid);
 	RevInfo(const RId &rid, const QList<DId> &stores);
-	RevInfo(const RevInfo &revInfo);
-	~RevInfo();
 
-	bool exists();
-	int error();
+	bool exists() const;
+	int error() const;
 
-	QList<DId> stores();
-	int flags();
-	quint64 size();
-	quint64 size(const Part &part);
-	PId hash(const Part &part);
-	QList<Part> parts();
-	QList<RId> parents();
-	QDateTime mtime();
-	QString type();
-	QString creator();
-	QString comment();
+	QList<DId> stores() const;
+	int flags() const;
+	quint64 size() const;
+	quint64 size(const Part &part) const;
+	PId hash(const Part &part) const;
+	QList<Part> parts() const;
+	QList<RId> parents() const;
+	QDateTime mtime() const;
+	QString type() const;
+	QString creator() const;
+	QString comment() const;
 
 private:
 	void fetch(const RId &rid, const QList<DId> *stores);
