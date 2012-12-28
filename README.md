@@ -17,6 +17,14 @@ Should be as simple as:
 
     qmake && make
 
+If you just want to build the library and applications without installing them
+you should invoke qmake the following way:
+
+    qmake CONFIG+=debug
+
+This will build the debug version which runs from the directory where it was
+built.
+
 License
 =======
 

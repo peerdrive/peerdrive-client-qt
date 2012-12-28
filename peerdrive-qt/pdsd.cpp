@@ -17,6 +17,7 @@
  */
 
 #include <QtEndian>
+#include <QStringList>
 #include <stdexcept>
 
 #include "pdsd.h"
@@ -75,6 +76,7 @@ public:
 	{
 		m_data = data;
 		m_offset = 0,
+		m_size = data.size();
 		m_store = store;
 	}
 
@@ -84,8 +86,12 @@ private:
 	template <typename T>
 	T getInt()
 	{
+		if (m_size < sizeof(T))
+			throw ValueError();
+
 		T tmp = qFromLittleEndian<T>((const uchar *)m_data.constData() + m_offset);
 		m_offset += sizeof(T);
+		m_size -= sizeof(T);
 		return tmp;
 	}
 
@@ -97,25 +103,38 @@ private:
 
 	QByteArray m_data;
 	unsigned int m_offset;
+	unsigned int m_size;
 	DId m_store;
 };
 
 template <>
 qint8 Parser::getInt<qint8>()
 {
+	if (m_size < 1)
+		throw ValueError();
+
+	m_size--;
 	return *((const qint8 *)m_data.constData() + m_offset++);
 }
 
 template <>
 quint8 Parser::getInt<quint8>()
 {
+	if (m_size < 1)
+		throw ValueError();
+
+	m_size--;
 	return *((const quint8 *)m_data.constData() + m_offset++);
 }
 
 QByteArray Parser::getBuffer(unsigned int len)
 {
+	if (m_size < len)
+		throw ValueError();
+
 	unsigned int off = m_offset;
 	m_offset += len;
+	m_size -= len;
 	return m_data.mid(off, len);
 }
 
@@ -199,8 +218,12 @@ Value Parser::parseList(unsigned int len)
 QString Parser::parseString()
 {
 	unsigned int len = getInt<quint32>();
+	if (m_size < len)
+		throw ValueError();
+
 	QString tmp = QString::fromUtf8(m_data.constData() + m_offset, len);
 	m_offset += len;
+	m_size -= len;
 	return tmp;
 }
 
@@ -584,15 +607,20 @@ Value Value::fromByteArray(const QByteArray &data, const DId &store)
 	return p.parse();
 }
 
-static QByteArray encodeQString(const QString &str)
+static QByteArray encodeQString(const QString &str, bool withTag)
 {
 	QByteArray res;
 	QByteArray utf8 = str.toUtf8();
 	unsigned int len = utf8.size();
 
-	res.resize(5);
-	res[0] = TAG_STRING;
-	qToLittleEndian<quint32>(len, (uchar*)res.data() + 1);
+	if (withTag) {
+		res.resize(5);
+		res[0] = TAG_STRING;
+		qToLittleEndian<quint32>(len, (uchar*)res.data() + 1);
+	} else {
+		res.resize(4);
+		qToLittleEndian<quint32>(len, (uchar*)res.data());
+	}
 	res.append(utf8);
 
 	return res;
@@ -665,7 +693,7 @@ QByteArray Value::toByteArray() const
 		}
 		case STRING:
 		{
-			res = encodeQString(*d->value.string);
+			res = encodeQString(*d->value.string, true);
 			break;
 		}
 		case BOOL:
@@ -695,7 +723,7 @@ QByteArray Value::toByteArray() const
 
 			QMap<QString, Value>::const_iterator i = d->value.dict->constBegin();
 			while (i != d->value.dict->constEnd()) {
-				res.append(encodeQString(i.key()));
+				res.append(encodeQString(i.key(), false));
 				res.append(i.value().toByteArray());
 				i++;
 			}
@@ -764,7 +792,7 @@ Link Folder::lookupSingle(const QString &path)
 
 /****************************************************************************/
 
-FSTab::FSTab(bool autoReload) : QObject()
+FSTab::FSTab(bool autoReload, QObject *parent) : QObject(parent)
 {
 	reload = autoReload;
 	file = NULL;
@@ -1020,6 +1048,31 @@ bool Registry::conformes(const QString &uti, const QString &superClass) const
 			return true;
 
 	return false;
+}
+
+QStringList Registry::executables(const QString &uti) const
+{
+	if (!registry.contains(uti))
+		return QStringList();
+
+	// list of executables for uti
+	Value exec = registry[uti].get("exec", Value(Value::LIST));
+	QStringList result;
+	for (int i = 0; i < exec.size(); i++)
+		result << exec[i].asString();
+
+	// extend with all superclasses
+	Value conforming = registry[uti].get("conforming", Value(Value::LIST));
+	for (int i = 0; i < conforming.size(); i++)
+		result.append(executables(conforming[i].asString()));
+
+	result.removeDuplicates();
+	return result;
+}
+
+QString Registry::icon(const QString &uti) const
+{
+	return search(uti, "icon", true, Value(QString("uti/unknown.png"))).asString();
 }
 
 }

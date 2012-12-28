@@ -23,13 +23,22 @@
 #include <QDateTime>
 #include <QMap>
 #include <QByteArray>
+#include <QMetaType>
 
 #include <string>
 
 namespace PeerDrive {
+	class DId;
+	class RId;
+	class PId;
+	class Part;
 	class Link;
 }
 
+uint qHash(const PeerDrive::DId&);
+uint qHash(const PeerDrive::RId&);
+uint qHash(const PeerDrive::PId&);
+uint qHash(const PeerDrive::Part&);
 uint qHash(const PeerDrive::Link&);
 
 namespace PeerDrive {
@@ -38,61 +47,70 @@ class EnumCnf_Store;
 
 class DId {
 public:
-	DId() { };
-	DId(const QByteArray &ba) { id = std::string(ba.constData(), ba.size()); }
-	DId(const std::string &str) : id(str) { };
-	std::string toStdString() const { return id; };
-	QByteArray toByteArray() const { return QByteArray(id.c_str(), id.size()); };
-	bool operator== (const DId &other) const { return id == other.id; };
-	bool operator!= (const DId &other) const { return id != other.id; };
+	DId() { }
+	DId(const QByteArray &ba) : id(ba) { }
+	DId(const std::string &str) { id = QByteArray(str.c_str(), str.size()); }
+	std::string toStdString() const { return std::string(id.constData(), id.size()); }
+	QByteArray toByteArray() const { return id; }
+
+	bool operator== (const DId &other) const { return id == other.id; }
+	bool operator!= (const DId &other) const { return id != other.id; }
 	bool operator< (const DId &other) const { return id < other.id; }
 
 private:
-	std::string id;
+	QByteArray id;
 };
 
 class RId {
 public:
-	RId() { };
-	RId(const std::string &str) : id(str) { };
-	RId(const QByteArray &ba) { id = std::string(ba.constData(), ba.size()); }
-	std::string toStdString() const { return id; };
-	QByteArray toByteArray() const { return QByteArray(id.c_str(), id.size()); };
-	bool operator== (const RId &other) const { return id == other.id; };
-	bool operator!= (const RId &other) const { return id != other.id; };
+	RId() { }
+	RId(const QByteArray &ba) : id(ba) { }
+	RId(const std::string &str) { id = QByteArray(str.c_str(), str.size()); }
+	std::string toStdString() const { return std::string(id.constData(), id.size()); }
+	QByteArray toByteArray() const { return id; }
+
+	bool operator== (const RId &other) const { return id == other.id; }
+	bool operator!= (const RId &other) const { return id != other.id; }
 	bool operator< (const RId &other) const { return id < other.id; }
+
 private:
-	std::string id;
+	QByteArray id;
 };
 
 class PId {
 public:
-	PId() { };
-	PId(const std::string &str) : id(str) { };
-	PId(const QByteArray &ba) { id = std::string(ba.constData(), ba.size()); }
-	std::string toStdString() const { return id; };
-	bool operator== (const PId &other) const { return id == other.id; };
-	bool operator!= (const PId &other) const { return id != other.id; };
+	PId() { }
+	PId(const QByteArray &ba) : id(ba) { }
+	PId(const std::string &str) { id = QByteArray(str.c_str(), str.size()); }
+	std::string toStdString() const { return std::string(id.constData(), id.size()); }
+	QByteArray toByteArray() const { return id; }
+
+	bool operator== (const PId &other) const { return id == other.id; }
+	bool operator!= (const PId &other) const { return id != other.id; }
 	bool operator< (const PId &other) const { return id < other.id; }
+
 private:
-	std::string id;
+	QByteArray id;
 };
 
 class Part {
 public:
-	Part(const std::string &str) : part(str) { };
-	std::string toStdString() const { return part; };
+	Part() { }
+	Part(const QByteArray &ba) : id(ba) { }
+	Part(const std::string &str) { id = QByteArray(str.c_str(), str.size()); }
+	std::string toStdString() const { return std::string(id.constData(), id.size()); }
+	QByteArray toByteArray() const { return id; }
 
-	bool operator== (const Part &other) const { return part == other.part; };
-	bool operator!= (const Part &other) const { return part != other.part; };
-	bool operator< (const Part &other) const { return part < other.part; }
+	bool operator== (const Part &other) const { return id == other.id; }
+	bool operator!= (const Part &other) const { return id != other.id; }
+	bool operator< (const Part &other) const { return id < other.id; }
 
 	static const Part FILE;
 	static const Part META;
 	static const Part PDSD;
 
 private:
-	std::string part;
+	QByteArray id;
 };
 
 /**
@@ -104,6 +122,7 @@ private:
 class Link {
 public:
 	Link();
+	Link(const QString &uri);
 	Link(const DId &store, const RId &rev);
 	Link(const DId &store, const DId &doc, bool update = true);
 	Link(const DId &store, const DId &doc, const RId &rev, bool isPreRev = false);
@@ -125,12 +144,12 @@ public:
 	RId rev() const;
 	DId doc() const;
 
+	QString uri() const;
 	QString getOsPath() const;
 
 protected:
 	enum State {
 		INVALID,
-		DOC_NOT_FOUND,
 		DOC_PRE_REV,
 		DOC_HEAD,
 		REV
@@ -148,7 +167,7 @@ class LinkWatcher : public QObject {
 	Q_OBJECT
 
 public:
-	LinkWatcher();
+	LinkWatcher(QObject *parent = NULL);
 	virtual ~LinkWatcher();
 
 	void addWatch(const Link &item);
@@ -160,6 +179,8 @@ public:
 		DIMINISHED,
 		DISAPPEARED
 	};
+
+	static Link rootDoc;
 
 signals:
 	void modified(const Link &item);
@@ -341,5 +362,11 @@ private:
 };
 
 }
+
+Q_DECLARE_METATYPE(PeerDrive::DId);
+Q_DECLARE_METATYPE(PeerDrive::RId);
+Q_DECLARE_METATYPE(PeerDrive::PId);
+Q_DECLARE_METATYPE(PeerDrive::Part);
+Q_DECLARE_METATYPE(PeerDrive::Link);
 
 #endif

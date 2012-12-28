@@ -1,4 +1,6 @@
-/cli/peerdrive
+apps/applet/applet
+apps/browser/browser
+apps/cli/peerdrive
 Makefile
 *.o
 lib*.so*
@@ -6,3 +8,4 @@ lib*.so*
 *.pb.cc
 *.pb.h
 moc_*.cpp
+ui_*.h

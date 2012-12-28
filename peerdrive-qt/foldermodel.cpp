@@ -19,9 +19,10 @@
 #include "peerdrive.h"
 #include "pdsd.h"
 
+#include <QIcon>
 #include <QList>
-#include <QVariant>
 #include <QSet>
+#include <QVariant>
 #include <stdexcept>
 
 #include "foldermodel.h"
@@ -100,7 +101,7 @@ bool FolderModel::canFetchMore(const QModelIndex &parent) const
 
 	FolderModelPrivate::Node *node = d->node(parent);
 	//qDebug() << "canFetchMore " << parent << !node->fetchingChildren;
-	return (!node->fetchingChildren);
+	return !node->fetchingChildren && node->unknownChildren > 0;
 }
 
 void FolderModel::fetchMore(const QModelIndex &parent)
@@ -129,7 +130,7 @@ int FolderModel::rowCount(const QModelIndex &parent) const
 	return node->visibleChildren.size();
 }
 
-int FolderModel::columnCount(const QModelIndex &parent) const
+int FolderModel::columnCount(const QModelIndex & /*parent*/) const
 {
 	return d->worker.columnCount;
 }
@@ -140,15 +141,20 @@ QVariant FolderModel::data(const QModelIndex &index, int role) const
 	if (!index.isValid())
 		return QVariant();
 
-	if (role != Qt::DisplayRole)
-		return QVariant();
-
 	FolderModelPrivate::Node *node = d->node(index);
 
-	if (index.column() >= node->columns.size())
-		return QVariant();
-
-	return node->columns.at(index.column());
+	switch (role) {
+		case Qt::DisplayRole:
+			if (index.column() >= node->columns.size())
+				return QVariant();
+			return node->columns.at(index.column());
+		case Qt::DecorationRole:
+			return QIcon(ICON_PATH "/" + Registry::instance().icon(node->type));
+		case LinkRole:
+			return QVariant::fromValue(node->link);
+		default:
+			return QVariant();
+	}
 }
 
 //bool FolderModel::setData(const QModelIndex &index, const QVariant &value, int role)
@@ -193,24 +199,18 @@ FolderModelPrivate::FolderModelPrivate(FolderModel *parent)
 {
 	q = parent;
 
-	//qDebug() << qRegisterMetaType<Fol>("Link");
-	qDebug() << qRegisterMetaType< QList<FolderInfo> >("QList<FolderInfo>");
+	qRegisterMetaType< QList<FolderInfo> >("QList<FolderInfo>");
 
 	connect(&worker, SIGNAL(updates(QList<FolderInfo>)),
 		this, SLOT(gotItemInfos(QList<FolderInfo>)), Qt::QueuedConnection);
+	connect(&watch, SIGNAL(modified(Link)), this, SLOT(itemChanged(Link)));
+	connect(&watch, SIGNAL(distributionChanged(Link, Distribution)),
+		this, SLOT(itemChanged(Link)));
 
-	root = new Node(Link(), NULL);
+	root = createNode(LinkWatcher::rootDoc, NULL);
 	root->visible = true;
 	root->fetchingChildren = true;
-
-	Mounts mounts;
-	foreach (Mounts::Store *s, mounts.regularStores()) {
-		Link l = Link(s->sid, s->sid);
-		Node *newNode = new Node(l, root);
-		nodes.insertMulti(l, newNode);
-		root->children[l] = newNode;
-		worker.fetch(l);
-	}
+	worker.fetch(LinkWatcher::rootDoc);
 }
 
 FolderModelPrivate::~FolderModelPrivate()
@@ -262,9 +262,16 @@ void FolderModelPrivate::updateColumns(Node *node, const QList<QVariant> &infos)
 void FolderModelPrivate::removeChild(Node *node, const Link &link)
 {
 	Node *oldNode = node->children.value(link);
+	QModelIndex parent = index(node);
+
+	if (!oldNode->fetched) {
+		node->unknownChildren--;
+		if (node->unknownChildren == 0)
+			emit q->fetched(parent);
+	}
+
 	if (oldNode->visible) {
 		int row = node->visibleChildren.indexOf(link);
-		QModelIndex parent = index(node);
 		q->beginRemoveRows(parent, row, row);
 		node->visibleChildren.removeAll(link);
 		q->endRemoveRows();
@@ -274,12 +281,26 @@ void FolderModelPrivate::removeChild(Node *node, const Link &link)
 	destroyNode(oldNode);
 }
 
+FolderModelPrivate::Node *FolderModelPrivate::createNode(const Link &link, Node *parent)
+{
+	Node *newNode = new Node(link, parent);
+
+	if (!nodes.contains(link))
+		watch.addWatch(link);
+
+	nodes.insertMulti(link, newNode);
+	return newNode;
+}
+
 void FolderModelPrivate::destroyNode(Node *node)
 {
 	foreach (Node *child, node->children.values())
 		destroyNode(child);
 
 	nodes.remove(node->link, node);
+	if (!nodes.contains(node->link))
+		watch.removeWatch(node->link);
+
 	delete node;
 }
 
@@ -292,6 +313,22 @@ void FolderModelPrivate::gotItemInfos(const QList<FolderInfo> &infos)
 
 void FolderModelPrivate::updateNode(Node *node, const FolderInfo &info)
 {
+	if (!node->fetched) {
+		node->fetched = true;
+		if (node->parent) {
+			// regular node has been fetched
+			node->parent->unknownChildren--;
+			if (node->parent->unknownChildren == 0) {
+				QModelIndex parentIdx = index(node->parent);
+				emit q->fetched(parentIdx);
+			}
+		} else if (!info.exists || info.childs.isEmpty()) {
+			// empty or non-existing root node
+			QModelIndex idx = index(node);
+			emit q->fetched(idx);
+		}
+	}
+
 	// does it still exists on the file system?
 	if (info.exists) {
 
@@ -301,9 +338,9 @@ void FolderModelPrivate::updateNode(Node *node, const FolderInfo &info)
 		// check for new children
 		QSet<Link> newChilds = curChilds - oldChilds;
 		for (QSet<Link>::const_iterator i = newChilds.constBegin(); i != newChilds.constEnd(); i++) {
-			Node *newNode = new Node(*i, node);
-			nodes.insertMulti(*i, newNode);
+			Node *newNode = createNode(*i, node);
 			node->children[*i] = newNode;
+			node->unknownChildren++;
 			if (node->fetchingChildren)
 				worker.fetch(*i);
 		}
@@ -316,6 +353,7 @@ void FolderModelPrivate::updateNode(Node *node, const FolderInfo &info)
 
 		// put the update at the end because the view will check for our childs
 		// via hasChildren()
+		node->type = info.type;
 		updateColumns(node, info.columns);
 	} else if (node->visible && node->parent) {
 		// visible node vanished
@@ -461,7 +499,11 @@ QVariant MetaColumnInfo::extract(const RevInfo &, const Value &metaData) const
 		for (int i = 0; i < path.size(); i++) {
 			if (!item.contains(path.at(i)))
 				return QVariant();
-			item = item[path.at(i)];
+
+			// FIXME: something goes wrong here if we assign 'item' directly
+			// reliably detectable with valgrind
+			Value item2 = item[path.at(i)];
+			item = item2;
 		}
 
 		switch (type) {
@@ -532,8 +574,12 @@ void FolderGatherer::run()
 
 		locker.unlock();
 
-		if (item.isValid())
-			getItemInfos(item);
+		if (item.isValid()) {
+			if (item == LinkWatcher::rootDoc)
+				getRootInfos();
+			else
+				getItemInfos(item);
+		}
 	}
 }
 
@@ -546,6 +592,7 @@ void FolderGatherer::getItemInfos(const Link &item)
 	info.link = item;
 	info.exists = stat.exists();
 	if (info.exists && file.peek()) {
+		info.type = stat.type();
 		try {
 			QByteArray tmp;
 			Value meta;
@@ -558,9 +605,6 @@ void FolderGatherer::getItemInfos(const Link &item)
 				for (int i = 0; i < folder.size(); i++) {
 					Link l = folder[i][""].asLink();
 					l.update();
-					if (!l.isValid())
-						continue;
-
 					info.childs.append(l);
 				}
 			}
@@ -575,6 +619,24 @@ void FolderGatherer::getItemInfos(const Link &item)
 		}
 
 		file.close();
+	}
+
+	infos.append(info);
+	//QThread::msleep(150);
+}
+
+void FolderGatherer::getRootInfos()
+{
+	FolderInfo info;
+
+	info.link = LinkWatcher::rootDoc;
+	info.exists = true;
+	info.type = "org.peerdrive.store";
+
+	Mounts mounts;
+	foreach (Mounts::Store *s, mounts.regularStores()) {
+		Link l = Link(s->sid, s->sid);
+		info.childs.append(l);
 	}
 
 	infos.append(info);

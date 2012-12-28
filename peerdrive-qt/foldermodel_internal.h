@@ -85,6 +85,7 @@ struct FolderInfo
 	bool exists;
 	QList<QVariant> columns;
 	QList<Link> childs;
+	QString type;
 };
 
 class FolderGatherer : public QThread
@@ -108,6 +109,7 @@ protected:
 
 private:
 	void getItemInfos(const Link &link);
+	void getRootInfos();
 	void dispatch(bool force);
 
     QMutex mutex;
@@ -129,7 +131,8 @@ public:
 	class Node {
 	public:
 		Node(const Link &link, Node *parent)
-			: link(link), parent(parent), visible(false), fetchingChildren(false)
+			: link(link), parent(parent), visible(false), fetchingChildren(false),
+			  unknownChildren(0), fetched(false)
 		{
 		}
 
@@ -145,6 +148,9 @@ public:
 		bool visible;
 		bool fetchingChildren;
 		QList<QVariant> columns;
+		int unknownChildren;
+		bool fetched;
+		QString type;
 	};
 
 	FolderModelPrivate(FolderModel *parent);
@@ -157,11 +163,13 @@ public:
 	QMultiHash<Link, Node*> nodes;
 	Node *root;
 	FolderGatherer worker;
+	LinkWatcher watch;
 
 private:
 	void updateNode(Node *node, const FolderInfo &info);
 	void updateColumns(Node *node, const QList<QVariant> &infos);
 	void removeChild(Node *node, const Link &link);
+	Node *createNode(const Link &link, Node *parent);
 	void destroyNode(Node *node);
 
 private slots:

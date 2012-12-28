@@ -122,7 +122,7 @@ class FSTab : public QObject
 	Q_OBJECT
 
 public:
-	FSTab(bool autoReload = false);
+	FSTab(bool autoReload = false, QObject *parent = NULL);
 	virtual ~FSTab();
 
 	bool load();
@@ -169,6 +169,8 @@ public:
 	Value search(const QString &uti, const QString &key, bool recursive = true,
 		const Value &defVal = Value()) const;
 	bool conformes(const QString &uti, const QString &superClass) const;
+	QString icon(const QString &uti) const;
+	QStringList executables(const QString &uti) const;
 
 private slots:
 	void modified(const Link &item);

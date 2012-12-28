@@ -30,6 +30,10 @@ class FolderModel : public QAbstractItemModel
     Q_OBJECT
 
 public:
+	enum ItemDataRole {
+		LinkRole = Qt::UserRole,
+	};
+
 	FolderModel(QObject *parent = 0);
 	~FolderModel();
 
@@ -57,6 +61,9 @@ public:
 	Qt::ItemFlags flags(const QModelIndex &index) const;
 
 	//void sort(int column, Qt::SortOrder order = Qt::AscendingOrder);
+
+signals:
+	void fetched(const QModelIndex &parent);
 
 private:
 	FolderModelPrivate *d;

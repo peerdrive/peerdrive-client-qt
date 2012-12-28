@@ -19,6 +19,7 @@
 #include <QtDebug>
 #include <QtEndian>
 #include <QProcessEnvironment>
+#include <stdexcept>
 
 #include "peerdrive.h"
 #include "peerdrive_internal.h"
@@ -525,15 +526,57 @@ void Connection::delWatch(LinkWatcher *watch, const RId &rev)
 
 /****************************************************************************/
 
-const Part Part::FILE("FILE");
-const Part Part::META("META");
-const Part Part::PDSD("PDSD");
+uint qHash(const PeerDrive::DId &id)
+{
+	return qHash(id.toByteArray());
+}
+
+uint qHash(const PeerDrive::RId &id)
+{
+	return qHash(id.toByteArray());
+}
+
+uint qHash(const PeerDrive::PId &id)
+{
+	return qHash(id.toByteArray());
+}
+
+uint qHash(const PeerDrive::Part &id)
+{
+	return qHash(id.toByteArray());
+}
+
+const Part Part::FILE(QByteArray("FILE"));
+const Part Part::META(QByteArray("META"));
+const Part Part::PDSD(QByteArray("PDSD"));
 
 /****************************************************************************/
 
 Link::Link()
 {
 	m_state = INVALID;
+}
+
+Link::Link(const QString &uri)
+{
+	m_state = INVALID;
+	QStringList frags = uri.split(":");
+	if (frags.size() != 3)
+		return;
+	// TODO: check hex characters
+
+	QByteArray store = QByteArray::fromHex(frags.at(1).toLatin1());
+	QByteArray item = QByteArray::fromHex(frags.at(2).toLatin1());
+
+	if (frags.at(0) == "doc") {
+		m_state = DOC_HEAD;
+		m_store = DId(store);
+		m_doc = DId(item);
+	} else if (frags.at(0) == "rev") {
+		m_state = REV;
+		m_store = DId(store);
+		m_rev = RId(item);
+	}
 }
 
 Link::Link(const DId &store, const RId &rev)
@@ -545,7 +588,7 @@ Link::Link(const DId &store, const RId &rev)
 
 Link::Link(const DId &store, const DId &doc, bool doUpdate)
 {
-	m_state = DOC_NOT_FOUND;
+	m_state = DOC_HEAD;
 	m_store = store;
 	m_doc = doc;
 
@@ -564,39 +607,22 @@ Link::Link(const DId &store, const DId &doc, const RId &rev, bool isPreRev)
 	m_rev = rev;
 }
 
-bool Link::operator== (const Link &other) const
-{
-	return m_state == other.m_state &&
-		m_store == other.m_store &&
-		m_rev == other.m_rev &&
-		m_doc == other.m_doc;
-}
-
-bool Link::operator< (const Link &other) const
-{
-	return m_state != other.m_state ? m_state < other.m_state :
-		(m_store != other.m_store ? m_store < other.m_store :
-		(m_rev != other.m_rev ? m_rev < other.m_rev :
-		m_doc < other.m_doc));
-}
-
 bool Link::update()
 {
 	switch (m_state) {
 		case INVALID:
 			return false;
 
-		case DOC_NOT_FOUND:
 		case DOC_HEAD:
 		{
 			DocInfo info(m_doc, m_store);
 			if (!info.exists()) {
-				m_state = DOC_NOT_FOUND;
+				m_rev = RId();
 				return false;
+			} else {
+				m_rev = info.head(m_store).rev();
+				return true;
 			}
-			m_rev = info.head(m_store).rev();
-			m_state = DOC_HEAD;
-			return true;
 		}
 
 		case DOC_PRE_REV:
@@ -627,15 +653,13 @@ bool Link::isRevLink() const
 
 bool Link::isDocLink() const
 {
-	return m_state == DOC_NOT_FOUND ||
-	       m_state == DOC_HEAD ||
+	return m_state == DOC_HEAD ||
 	       m_state == DOC_PRE_REV;
 }
 
 bool Link::isDocHeadLink() const
 {
-	return m_state == DOC_NOT_FOUND ||
-	       m_state == DOC_HEAD;
+	return m_state == DOC_HEAD;
 }
 
 bool Link::isDocPreRevLink() const
@@ -666,7 +690,6 @@ QString Link::getOsPath() const
 	switch (m_state) {
 		case INVALID:
 			return QString();
-		case DOC_NOT_FOUND:
 		case DOC_HEAD:
 			req.set_object(m_doc.toStdString());
 			req.set_is_rev(false);
@@ -685,18 +708,84 @@ QString Link::getOsPath() const
 	return QString::fromUtf8(cnf.path().c_str());
 }
 
+QString Link::uri() const
+{
+	switch (m_state) {
+		case DOC_HEAD:
+			return "doc:" + m_store.toByteArray().toHex() + ":" +
+				m_doc.toByteArray().toHex();
+		case REV:
+			return "rev:" + m_store.toByteArray().toHex() + ":" +
+				m_rev.toByteArray().toHex();
+		default:
+			return QString();
+	}
+}
+
+bool Link::operator== (const Link &other) const
+{
+	if (m_state != other.m_state || m_store != other.m_store)
+		return false;
+
+	switch (m_state) {
+		case INVALID:
+			return true;
+		case DOC_PRE_REV:
+			return m_rev == other.m_rev && m_doc == other.m_doc;
+		case DOC_HEAD:
+			return m_doc == other.m_doc;
+		case REV:
+			return m_rev == other.m_rev;
+	}
+}
+
+bool Link::operator< (const Link &other) const
+{
+	if (m_state != other.m_state)
+		return m_state < other.m_state;
+
+	if (m_store != other.m_store)
+		return m_store < other.m_store;
+
+	switch (m_state) {
+		case DOC_PRE_REV:
+			if (m_rev != other.m_rev)
+				return m_rev < other.m_rev;
+		case DOC_HEAD:
+			return m_doc < other.m_doc;
+		case REV:
+			return m_rev < other.m_rev;
+		default:
+			return false;
+	}
+}
+
 uint qHash(const PeerDrive::Link &link)
 {
-	return qHash(link.m_store.toByteArray()) ^
-		qHash(link.m_rev.toByteArray()) ^
-		qHash(link.m_doc.toByteArray()) ^
-		link.m_state;
+	uint h = qHash(link.m_store.toByteArray()) ^ link.m_state;
+
+	switch (link.m_state) {
+		case Link::DOC_PRE_REV:
+			h ^= qHash(link.m_rev.toByteArray());
+		case Link::DOC_HEAD:
+			h ^= qHash(link.m_doc.toByteArray());
+			break;
+		case Link::REV:
+			h ^= qHash(link.m_rev.toByteArray());
+			break;
+		default:
+			break;
+	}
+
+	return h;
 }
 
 /****************************************************************************/
 
-LinkWatcher::LinkWatcher()
-	: QObject()
+Link LinkWatcher::rootDoc = Link(DId(QByteArray(16, 0)), DId(QByteArray(16, 0)), RId());
+
+LinkWatcher::LinkWatcher(QObject *parent)
+	: QObject(parent)
 {
 }
 
@@ -1207,7 +1296,7 @@ bool Document::peek()
 bool Document::update(const QString &creator)
 {
 	close();
-	if (!m_link.isValid() || !m_link.isDocHeadLink()) {
+	if (!m_link.isDocHeadLink()) {
 		m_error = ERR_EBADF;
 		return false;
 	}
@@ -1232,7 +1321,7 @@ bool Document::update(const QString &creator)
 bool Document::resume(const QString &creator)
 {
 	close();
-	if (!m_link.isValid() || !m_link.isDocPreRevLink()) {
+	if (!m_link.isDocPreRevLink()) {
 		m_error = ERR_EBADF;
 		return false;
 	}
@@ -1349,6 +1438,7 @@ qint64 Document::readAll(const Part &part, QByteArray &data)
 		off += len;
 	} while (len == 0x10000);
 
+	data.resize(off);
 	return off;
 }
 

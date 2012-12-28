@@ -1,3 +1,3 @@
 TEMPLATE = subdirs
-SUBDIRS = peerdrive-qt cli
+SUBDIRS = peerdrive-qt apps
 CONFIG += ordered
