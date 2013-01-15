@@ -1,6 +1,6 @@
 /*
  * PeerDrive
- * Copyright (C) 2012  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+ * Copyright (C) 2013  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

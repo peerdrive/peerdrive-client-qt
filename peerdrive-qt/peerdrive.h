@@ -1,6 +1,6 @@
 /*
  * This file is part of the PeerDrive Qt4 library.
- * Copyright (C) 2012  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+ * Copyright (C) 2013  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
  *
  * PeerDrive is free software: you can redistribute it and/or modify it under
  * the terms of the GNU Lesser General Public License as published by the Free
