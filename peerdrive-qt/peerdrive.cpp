@@ -235,6 +235,8 @@ QMutex Connection::instanceMutex;
 
 Connection::Connection()
 	: QThread(),
+	  watchMutex(QMutex::Recursive),
+	  progressMutex(QMutex::Recursive),
 	  m_maxPacketSize(16384)
 {
 	QMutexLocker locker(&startupMutex);
@@ -387,9 +389,32 @@ int Connection::_rpc(int msg, const QByteArray &req, ConnectionHandler::Completi
 void Connection::dispatchIndication(const QByteArray &buf)
 {
 	quint16 msg = qFromBigEndian<quint16>((const uchar *)buf.constData()) >> 4;
+	QByteArray packet = buf.mid(2);
+
 	switch (msg) {
 		case WATCH_MSG:
-			dispatchWatch(buf.mid(2));
+			dispatchWatch(packet);
+			break;
+		case PROGRESS_START_MSG:
+		{
+			ProgressStartInd ind;
+			if (ind.ParseFromArray(packet.constData(), packet.size())) {
+				QMutexLocker lock(&progressMutex);
+				dispatchProgressStart(ind, true);
+			}
+			break;
+		}
+		case PROGRESS_MSG:
+		{
+			ProgressInd ind;
+			if (ind.ParseFromArray(packet.constData(), packet.size())) {
+				QMutexLocker lock(&progressMutex);
+				dispatchProgress(ind, true);
+			}
+			break;
+		}
+		case PROGRESS_END_MSG:
+			dispatchProgressEnd(packet);
 			break;
 	}
 }
@@ -422,6 +447,161 @@ void Connection::dispatchWatch(const QByteArray &packet)
 			break;
 		}
 	}
+}
+
+void Connection::dispatchProgressStart(const ProgressStartInd &ind, bool dispatch)
+{
+	Progress *p = new Progress;
+	p->src = DId(ind.source());
+	p->dst = DId(ind.dest());
+	p->state = ProgressWatcher::Running;
+	p->error = 0;
+	p->progress = 0;
+
+	switch (ind.type()) {
+		case ProgressStartInd::SYNC:
+			p->type = ProgressWatcher::Synchronization;
+			break;
+		case ProgressStartInd::REP_DOC:
+			p->type = ProgressWatcher::Replication;
+			p->item = Link(DId(ind.source()), DId(ind.item()));
+			break;
+		case ProgressStartInd::REP_REV:
+			p->type = ProgressWatcher::Replication;
+			p->item = Link(DId(ind.source()), RId(ind.item()));
+			break;
+	}
+
+	unsigned int tag = ind.tag();
+	m_progressItems[tag] = p;
+
+	if (dispatch)
+		foreach(ProgressWatcher *w, m_progressWatches)
+			emit w->started(tag);
+}
+
+void Connection::dispatchProgress(const ProgressInd &ind, bool dispatch)
+{
+	unsigned int tag = ind.tag();
+	if (!m_progressItems.contains(tag))
+		return;
+
+	Progress *p = m_progressItems.value(tag);
+	p->progress = ind.progress();
+	p->state = static_cast<ProgressWatcher::State>(ind.state());
+	if (ind.has_err_code())
+		p->error = ind.err_code();
+
+	if (ind.has_err_doc()) {
+		if (ind.has_err_rev())
+			p->errorItem = Link(p->src, DId(ind.err_doc()), RId(ind.err_rev()));
+		else
+			p->errorItem = Link(p->src, DId(ind.err_doc()));
+	} else if (ind.has_err_rev()) {
+		p->errorItem = Link(p->src, RId(ind.err_rev()));
+	}
+
+	if (dispatch)
+		foreach(ProgressWatcher *w, m_progressWatches)
+			emit w->changed(tag);
+}
+
+void Connection::dispatchProgressEnd(const QByteArray &packet)
+{
+	ProgressEndInd ind;
+	if (!ind.ParseFromArray(packet.constData(), packet.size()))
+		return;
+
+	unsigned int tag = ind.tag();
+
+	QMutexLocker lock(&progressMutex);
+	if (!m_progressItems.contains(tag))
+		return;
+
+	delete m_progressItems.take(tag);
+
+	foreach(ProgressWatcher *w, m_progressWatches)
+		emit w->finished(tag);
+}
+
+void Connection::addProgressWatch(ProgressWatcher *watch)
+{
+	QMutexLocker lock(&progressMutex);
+
+	/*
+	 * If we're the first then we have to query all ongoing operations and
+	 * request to be notified in the future.
+	 */
+	if (m_progressWatches.isEmpty()) {
+		QByteArray rawReq, rawCnf;
+
+		// enable notifications
+		WatchProgressReq req;
+		req.set_enable(true);
+		rawReq.resize(req.ByteSize());
+		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
+		int err = rpc(WATCH_PROGRESS_MSG, rawReq);
+		if (err) {
+			qDebug() << "::PeerDrive::Connection::addProgressWatch: enable failed:" << err;
+			return;
+		}
+
+		// query ongoing operations
+		rawReq.resize(0);
+		err = rpc(PROGRESS_QUERY_MSG, rawReq, rawCnf);
+		if (err) {
+			qDebug() << "::PeerDrive::Connection::addProgressWatch: query failed:" << err;
+			return;
+		}
+
+		ProgressQueryCnf cnf;
+		if (!cnf.ParseFromArray(rawCnf.constData(), rawCnf.size()))
+			return;
+
+		for (int i = 0; i < cnf.items_size(); i++) {
+			const ProgressQueryCnf_Item &item = cnf.items(i);
+			dispatchProgressStart(item.item(), false);
+			dispatchProgress(item.state(), false);
+		}
+	}
+
+	m_progressWatches.append(watch);
+}
+
+void Connection::delProgressWatch(ProgressWatcher *watch)
+{
+	QMutexLocker lock(&progressMutex);
+	m_progressWatches.removeOne(watch);
+
+	if (m_progressWatches.isEmpty()) {
+		// If we were the last free everything...
+		QMap<unsigned int, Progress*>::const_iterator i = m_progressItems.constBegin();
+		while (i != m_progressItems.constEnd()) {
+			delete i.value();
+			++i;
+		}
+		m_progressItems.clear();
+
+		// disable notification
+		WatchProgressReq req;
+		QByteArray rawReq;
+		req.set_enable(false);
+		rawReq.resize(req.ByteSize());
+		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
+		int err = rpc(WATCH_PROGRESS_MSG, rawReq);
+		if (err)
+			qDebug() << "::PeerDrive::Connection::delProgressWatch failed:" << err;
+	}
+}
+
+Connection::Progress* Connection::findProgress(unsigned int tag) const
+{
+	return m_progressItems.value(tag, NULL);
+}
+
+QList<unsigned int> Connection::progressTags() const
+{
+	return m_progressItems.keys();
 }
 
 int Connection::addWatch(LinkWatcher *watch, const DId &doc)
@@ -849,6 +1029,102 @@ void LinkWatcher::dispatch(const Link &item, int event)
 			emit distributionChanged(item, DISAPPEARED);
 			break;
 	}
+}
+
+/****************************************************************************/
+
+ProgressWatcher::ProgressWatcher(QObject *parent)
+	: QObject(parent)
+{
+	Connection::instance()->addProgressWatch(this);
+}
+
+ProgressWatcher::~ProgressWatcher()
+{
+	Connection::instance()->delProgressWatch(this);
+}
+
+Link ProgressWatcher::source(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? Link(p->src, p->src) : Link();
+}
+
+Link ProgressWatcher::destination(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? Link(p->dst, p->dst) : Link();
+}
+
+Link ProgressWatcher::item(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? p->item : Link();
+}
+
+ProgressWatcher::Type ProgressWatcher::type(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? p->type : Synchronization;
+}
+
+ProgressWatcher::State ProgressWatcher::state(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? p->state : Error;
+}
+
+int ProgressWatcher::error(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? p->error : -1;
+}
+
+Link ProgressWatcher::errorItem(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? p->errorItem : Link();
+}
+
+int ProgressWatcher::progress(unsigned int tag) const
+{
+	Connection::Progress *p = Connection::instance()->findProgress(tag);
+	return p ? p->progress : -1;
+}
+
+QList<unsigned int> ProgressWatcher::tags() const
+{
+	return Connection::instance()->progressTags();
+}
+
+int ProgressWatcher::pause(unsigned int tag)
+{
+	ProgressEndReq req;
+
+	req.set_tag(tag);
+	req.set_pause(true);
+
+	return Connection::defaultRPC<ProgressEndReq>(PROGRESS_END_MSG, req);
+}
+
+int ProgressWatcher::resume(unsigned int tag, bool skip)
+{
+	ProgressStartReq req;
+
+	req.set_tag(tag);
+	req.set_skip(skip);
+
+	return Connection::defaultRPC<ProgressStartReq>(PROGRESS_START_MSG, req);
+}
+
+int ProgressWatcher::stop(unsigned int tag)
+{
+	ProgressEndReq req;
+
+	req.set_tag(tag);
+	req.set_pause(false);
+
+	return Connection::defaultRPC<ProgressEndReq>(PROGRESS_END_MSG, req);
 }
 
 /****************************************************************************/

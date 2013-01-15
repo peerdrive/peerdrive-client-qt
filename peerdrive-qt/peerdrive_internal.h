@@ -76,6 +76,7 @@
 namespace PeerDrive {
 
 class LinkWatcher;
+class ProgressWatcher;
 
 class ConnectionHandler : public QObject
 {
@@ -164,8 +165,23 @@ public:
 	int addWatch(LinkWatcher *watch, const RId &rev);
 	void delWatch(LinkWatcher *watch, const DId &doc);
 	void delWatch(LinkWatcher *watch, const RId &rev);
+	void addProgressWatch(ProgressWatcher *watch);
+	void delProgressWatch(ProgressWatcher *watch);
 
 	unsigned int maxPacketSize() { return m_maxPacketSize; }
+
+	struct Progress {
+		DId src;
+		DId dst;
+		Link item;
+		ProgressWatcher::Type type;
+		ProgressWatcher::State state;
+		int error;
+		int progress;
+		Link errorItem;
+	};
+	Progress* findProgress(unsigned int tag) const;
+	QList<unsigned int> progressTags() const;
 
 protected:
 	int _rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion);
@@ -175,6 +191,9 @@ protected:
 private slots:
 	void dispatchIndication(const QByteArray &packet);
 	void dispatchWatch(const QByteArray &packet);
+	void dispatchProgressStart(const ProgressStartInd &ind, bool dispatch);
+	void dispatchProgress(const ProgressInd &ind, bool dispatch);
+	void dispatchProgressEnd(const QByteArray &packet);
 
 private:
 	Connection();
@@ -183,7 +202,11 @@ private:
 
 	QMap<DId, QList<LinkWatcher*> > m_docWatches;
 	QMap<RId, QList<LinkWatcher*> > m_revWatches;
+	QList<ProgressWatcher*> m_progressWatches;
 	QMutex watchMutex;
+
+	QMap<unsigned int, Progress*> m_progressItems;
+	QMutex progressMutex;
 
 	QMutex startupMutex;
 	QWaitCondition startupDone;

@@ -197,6 +197,47 @@ private:
 	QList<Link> watchedLinks;
 };
 
+class ProgressWatcher : public QObject
+{
+	Q_OBJECT
+
+public:
+	ProgressWatcher(QObject *parent = NULL);
+	virtual ~ProgressWatcher();
+
+	enum Type {
+		Synchronization,
+		Replication
+	};
+
+	enum State {
+		Running,
+		Paused,
+		Error
+	};
+
+	QList<unsigned int> tags() const;
+
+	Link source(unsigned int tag) const;
+	Link destination(unsigned int tag) const;
+	Link item(unsigned int tag) const;
+	Type type(unsigned int tag) const;
+	State state(unsigned int tag) const;
+	int error(unsigned int tag) const;
+	Link errorItem(unsigned int tag) const;
+	int progress(unsigned int tag) const;
+
+	static int pause(unsigned int tag);
+	static int resume(unsigned int tag, bool skip = false);
+	static int stop(unsigned int tag);
+
+signals:
+	void started(unsigned int tag);
+	void changed(unsigned int tag);
+	void finished(unsigned int tag);
+	friend class Connection;
+};
+
 class Mounts {
 public:
 	struct Store {
