@@ -13,11 +13,13 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QLabel;
+class QVBoxLayout;
 
 namespace PeerDrive {
 	class FolderModel;
 	class FSTab;
 	class LinkWatcher;
+	class ProgressWatcher;
 }
 
 class Window : public QDialog
@@ -50,6 +52,8 @@ private slots:
 	void addSyncRule();
 	void editSyncRule();
 	void removeSyncRule();
+	void progressStart(unsigned int tag);
+	void progressEnd(unsigned int tag);
 
 private:
 	QMenu *findMenu(const QModelIndex &index);
@@ -66,9 +70,11 @@ private:
 	QPushButton *editSync;
 	QPushButton *removeSync;
 	QLabel *idleLabel;
+	QVBoxLayout *progressLayout;
 
 	PeerDrive::FSTab *fstab;
 	PeerDrive::LinkWatcher *watch;
+	PeerDrive::ProgressWatcher *progressWatch;
 	QSet<QString> knownMounted;
 	SyncRules *syncRules;
 };

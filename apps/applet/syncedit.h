@@ -25,8 +25,6 @@ private slots:
 	void accept();
 
 private:
-	QString readTitle(const PeerDrive::DId &doc);
-
 	SyncRules *rules;
 };
 

@@ -3,6 +3,7 @@
 #include <peerdrive-qt/pdsd.h>
 #include "syncedit.h"
 #include "syncrules.h"
+#include "utils.h"
 
 #include <QVariant>
 #include <QMessageBox>
@@ -34,7 +35,7 @@ SyncEdit::SyncEdit(SyncRules *rules, QWidget *parent)
 	// get all available stores
 	PeerDrive::Mounts mounts;
 	foreach (PeerDrive::Mounts::Store *s, mounts.regularStores()) {
-		QString title = s->label + ": " + readTitle(s->sid);
+		QString title = s->label + ": " + readTitle(Link(s->sid, s->sid));
 		masterStore->addItem(title, QVariant::fromValue(s->sid));
 		slaveStore->addItem(title, QVariant::fromValue(s->sid));
 	}
@@ -72,9 +73,9 @@ SyncEdit::SyncEdit(SyncRules *rules, const PeerDrive::DId &from,
 	PeerDrive::Mounts mounts;
 	foreach (PeerDrive::Mounts::Store *s, mounts.regularStores()) {
 		if (s->sid == from)
-			fromTitle = s->label + ": " + readTitle(s->sid);
+			fromTitle = s->label + ": " + readTitle(Link(s->sid, s->sid));
 		else if (s->sid == to)
-			toTitle = s->label + ": " + readTitle(s->sid);
+			toTitle = s->label + ": " + readTitle(Link(s->sid, s->sid));
 	}
 
 	masterStore->addItem(fromTitle, QVariant::fromValue(from));
@@ -86,28 +87,6 @@ SyncEdit::SyncEdit(SyncRules *rules, const PeerDrive::DId &from,
 
 SyncEdit::~SyncEdit()
 {
-}
-
-QString SyncEdit::readTitle(const PeerDrive::DId &doc)
-{
-	QString name = "<Unknown>";
-	try {
-		PeerDrive::Document file(PeerDrive::Link(doc, doc));
-		if (!file.peek())
-			return name;
-
-		QByteArray tmp;
-		if (file.readAll(PeerDrive::Part::META, tmp) <= 0)
-			return name;
-
-		PeerDrive::Value meta = PeerDrive::Value::fromByteArray(tmp, doc);
-		name = meta["org.peerdrive.annotation"]["title"].asString();
-	} catch (PeerDrive::ValueError&) {
-	}
-
-	if (name.length() > 42)
-		name = name.left(40) + "...";
-	return name;
 }
 
 void SyncEdit::storesSelected()

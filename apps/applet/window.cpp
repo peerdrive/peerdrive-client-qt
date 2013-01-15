@@ -10,6 +10,7 @@
 #include "window.h"
 #include "syncrules.h"
 #include "syncedit.h"
+#include "progresswidget.h"
 
 #include <QtDebug>
 
@@ -37,16 +38,18 @@ public:
 Window::Window()
 {
 	fstab = new PeerDrive::FSTab(true, this);
-	if (!fstab->load()) {
+	if (!fstab->load())
 		qDebug() << "Cannot load sys:/fstab";
-		QCoreApplication::exit(1);
-	}
+
+	progressWatch = new PeerDrive::ProgressWatcher(this);
+	connect(progressWatch, SIGNAL(started(unsigned int)),
+		this, SLOT(progressStart(unsigned int)));
+	connect(progressWatch, SIGNAL(finished(unsigned int)),
+		this, SLOT(progressEnd(unsigned int)));
 
 	syncRules = new SyncRules;
-	if (!syncRules->load()) {
+	if (!syncRules->load())
 		qDebug() << "Cannot load sys:/syncrules";
-		QCoreApplication::exit(1);
-	}
 	connect(syncRules, SIGNAL(modified()), this, SLOT(fillSyncRules()));
 
 	PeerDrive::Mounts mounts;
@@ -85,7 +88,7 @@ Window::Window()
 	// window content
 
 	idleLabel = new QLabel(tr("PeerDrive is idle"));
-	QVBoxLayout *progressLayout = new QVBoxLayout;
+	progressLayout = new QVBoxLayout;
 	progressLayout->addWidget(idleLabel);
 	QGroupBox *progressGroupBox = new QGroupBox(tr("Current activity"));
 	progressGroupBox->setLayout(progressLayout);
@@ -457,10 +460,10 @@ void Window::fillSyncRules()
 
 		SyncListItem *item = new SyncListItem(from, to, syncRulesList);
 		item->setText(syncRules->description(i));
-		if (mounted.contains(from) && mounted.contains(to))
-			item->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
-		else
-			item->setFlags(Qt::ItemIsSelectable);
+		//if (mounted.contains(from) && mounted.contains(to))
+		//	item->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+		//else
+		//	item->setFlags(Qt::ItemIsSelectable);
 	}
 }
 
@@ -504,5 +507,18 @@ void Window::removeSyncRule()
 			QMessageBox::critical(this, tr("Synchronization rules"),
 				tr("Could not save rules!"));
 	}
+}
+
+void Window::progressStart(unsigned int tag)
+{
+	idleLabel->hide();
+	ProgressWidget *w = new ProgressWidget(progressWatch, tag, trayIcon, this);
+	progressLayout->addWidget(w);
+}
+
+void Window::progressEnd(unsigned int /*tag*/)
+{
+	if (progressWatch->tags().isEmpty())
+		idleLabel->show();
 }
 
