@@ -101,7 +101,7 @@ bool FolderModel::canFetchMore(const QModelIndex &parent) const
 
 	FolderModelPrivate::Node *node = d->node(parent);
 	//qDebug() << "canFetchMore " << parent << !node->fetchingChildren;
-	return !node->fetchingChildren && node->unknownChildren > 0;
+	return node->unknownChildren > 0;
 }
 
 void FolderModel::fetchMore(const QModelIndex &parent)

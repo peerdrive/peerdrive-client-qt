@@ -212,14 +212,17 @@ void Window::rowsInserted(const QModelIndex &parent, int start, int end)
 		QStringList execList = PeerDrive::Registry::instance().executables(stat.type());
 
 		QAction *action;
-		if (model->rowCount(idx) > 0 || model->canFetchMore(idx)) {
+		if (model->rowCount(idx) > 0 || model->canFetchMore(idx) || !parent.isValid()) {
 			QMenu *subMenu = new QMenu(title, menu);
 			subMenu->setEnabled(false);
 			connect(subMenu, SIGNAL(aboutToShow()), this, SLOT(showFolderMenu()));
 			action = subMenu->menuAction();
 
-			if (model->canFetchMore(idx) && menu->isVisible())
-				model->fetchMore(idx);
+			if (model->canFetchMore(idx)) {
+				if (menu->isVisible())
+					model->fetchMore(idx);
+			} else
+				subMenu->setEnabled(true);
 
 			if (execList.size() > 0) {
 				subMenu->addSeparator();
