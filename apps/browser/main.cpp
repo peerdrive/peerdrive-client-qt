@@ -16,20 +16,16 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <QtGui>
+#include <QApplication>
 
-#include "peerdrive-qt/foldermodel.h"
+#include "mainwindow.h"
 
 int main(int argc, char *argv[])
 {
 	QApplication app(argc, argv);
 
-	PeerDrive::FolderModel model;
-
-	QTreeView view;
-	view.setModel(&model);
-	view.setWindowTitle(QObject::tr("Simple Tree Model"));
-	view.show();
+	MainWindow mainWin;
+	mainWin.show();
 
 	return app.exec();
 }
