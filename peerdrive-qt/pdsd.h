@@ -169,6 +169,8 @@ public:
 	Value search(const QString &uti, const QString &key, bool recursive = true,
 		const Value &defVal = Value()) const;
 	bool conformes(const QString &uti, const QString &superClass) const;
+	QStringList conformes(const QString &uti) const;
+	QString title(const QString &uti) const;
 	QString icon(const QString &uti) const;
 	QStringList executables(const QString &uti) const;
 

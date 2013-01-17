@@ -1050,6 +1050,19 @@ bool Registry::conformes(const QString &uti, const QString &superClass) const
 	return false;
 }
 
+QStringList Registry::conformes(const QString &uti) const
+{
+	if (!registry.contains(uti))
+		return QStringList();
+
+	QStringList result;
+	Value conforming = registry[uti].get("conforming", Value(Value::LIST));
+	for (int i = 0; i < conforming.size(); i++)
+		result.append(conforming[i].asString());
+
+	return result;
+}
+
 QStringList Registry::executables(const QString &uti) const
 {
 	if (!registry.contains(uti))
@@ -1073,6 +1086,11 @@ QStringList Registry::executables(const QString &uti) const
 QString Registry::icon(const QString &uti) const
 {
 	return search(uti, "icon", true, Value(QString("uti/unknown.png"))).asString();
+}
+
+QString Registry::title(const QString &uti) const
+{
+	return search(uti, "display", true, Value(QString("unknown"))).asString();
 }
 
 }
