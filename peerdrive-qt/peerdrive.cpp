@@ -1318,7 +1318,7 @@ int RevInfo::flags() const
 
 quint64 RevInfo::size() const
 {
-	quint64 sum;
+	quint64 sum = 0;
 	for (QMap<Part, quint64>::const_iterator i = m_partSizes.constBegin();
 	     i != m_partSizes.constEnd(); i++)
 		sum += i.value();
