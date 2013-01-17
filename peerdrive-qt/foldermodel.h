@@ -32,6 +32,7 @@ class FolderModel : public QAbstractItemModel
 public:
 	enum ItemDataRole {
 		LinkRole = Qt::UserRole,
+		TypeCodeRole,
 	};
 
 	FolderModel(QObject *parent = 0);
@@ -40,8 +41,10 @@ public:
 	void setRootItem(const Link &link);
 	Link rootItem() const;
 
-	//QStringList columns() const;
-	//void setColumns(const QStringList &cols);
+	QStringList columns() const;
+	void setColumns(const QStringList &cols);
+	void insertColumn(const QString &key, int column);
+	void removeColumn(int column);
 
 	QModelIndex index(int row, int column, const QModelIndex &parent = QModelIndex()) const;
 	QModelIndex index(const Link &item, int column = 0) const;
@@ -60,7 +63,7 @@ public:
 
 	Qt::ItemFlags flags(const QModelIndex &index) const;
 
-	//void sort(int column, Qt::SortOrder order = Qt::AscendingOrder);
+	void sort(int column, Qt::SortOrder order = Qt::AscendingOrder);
 
 signals:
 	void fetched(const QModelIndex &parent);

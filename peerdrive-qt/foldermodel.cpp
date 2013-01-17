@@ -23,6 +23,7 @@
 #include <QList>
 #include <QSet>
 #include <QVariant>
+#include <QLocale>
 #include <stdexcept>
 
 #include "foldermodel.h"
@@ -49,9 +50,12 @@ FolderModel::~FolderModel()
 	delete d;
 }
 
-//void FolderModel::setRootItem(const Link &link)
-//{
-//}
+void FolderModel::setRootItem(const Link &link)
+{
+	beginResetModel();
+	d->setRootItem(link);
+	endResetModel();
+}
 
 QModelIndex FolderModel::index(int row, int column, const QModelIndex &parent) const
 {
@@ -135,6 +139,25 @@ int FolderModel::columnCount(const QModelIndex & /*parent*/) const
 	return d->worker.columnCount;
 }
 
+static QVariant formatSize(qulonglong size)
+{
+	const char *units[] = { "Bytes", "KiB", "MiB", "GiB" };
+
+	int unit = 0;
+	unsigned int frac = 0;
+	while (unit < 3 && size > (1 << 10)) {
+		unit++;
+		frac = size & 1023;
+		size >>= 10;
+	}
+
+	if (frac)
+		return QString("%1%2%3 %4").arg(size).arg(QLocale::system().decimalPoint())
+			.arg(frac / 102).arg(units[unit]);
+	else
+		return QString("%1 %2").arg(size).arg(units[unit]);
+}
+
 QVariant FolderModel::data(const QModelIndex &index, int role) const
 {
 	//qDebug() << "data" << index << role;
@@ -147,11 +170,20 @@ QVariant FolderModel::data(const QModelIndex &index, int role) const
 		case Qt::DisplayRole:
 			if (index.column() >= node->columns.size())
 				return QVariant();
-			return node->columns.at(index.column());
+
+			if (d->worker.columnSizeMask & (1UL << index.column()))
+				return formatSize(node->columns.at(index.column()).toULongLong());
+			else
+				return node->columns.at(index.column());
 		case Qt::DecorationRole:
-			return QIcon(ICON_PATH "/" + Registry::instance().icon(node->type));
+			if (index.column() == 0)
+				return QIcon(ICON_PATH "/" + Registry::instance().icon(node->type));
+			else
+				return QVariant();
 		case LinkRole:
 			return QVariant::fromValue(node->link);
+		case TypeCodeRole:
+			return node->type;
 		default:
 			return QVariant();
 	}
@@ -177,20 +209,78 @@ Qt::ItemFlags FolderModel::flags(const QModelIndex &index) const
 	return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 }
 
-//void FolderModel::sort(int column, Qt::SortOrder order)
-//{
-//}
+void FolderModel::sort(int column, Qt::SortOrder order)
+{
+	if (column < 0 || column >= d->worker.columnCount)
+		return;
 
-//QStringList FolderModel::columns() const
-//{
-//}
-//
-//void FolderModel::setColumns(const QStringList &cols)
-//{
-//	QWriteLocker lock(&d->worker.columnsLock);
-//
-//	// clear all columns
-//}
+	if (d->sortOrder == order && d->sortColumn == column)
+		return;
+
+	emit layoutAboutToBeChanged();
+
+	// get nodes of active persistent indexes
+	QModelIndexList oldList = persistentIndexList();
+	QList<FolderModelPrivate::Node*> oldNodes;
+	for (int i = 0; i < oldList.count(); ++i)
+		oldNodes.append(d->node(oldList.at(i)));
+
+	// do actual sort
+	d->sortColumn = column;
+	d->sortOrder = order;
+	d->sort();
+
+	// update persistent index list
+	QModelIndexList newList;
+	for (int i = 0; i < oldNodes.count(); ++i)
+		newList.append(d->index(oldNodes.at(i), oldList.at(i).column()));
+	changePersistentIndexList(oldList, newList);
+
+	emit layoutChanged();
+}
+
+QStringList FolderModel::columns() const
+{
+	return d->worker.columnDefs();
+}
+
+void FolderModel::setColumns(const QStringList &cols)
+{
+	if (cols.size() == 0)
+		return;
+
+	beginResetModel();
+
+	// update worker to fetch the right data
+	d->worker.setColumns(cols);
+
+	// clear all columns an re-fetch it
+	QList<QVariant> empty;
+	for (int i = 0; i < cols.size(); i++)
+		empty << QVariant();
+
+	d->setNodeColumns(d->root, empty);
+
+	endResetModel();
+}
+
+void FolderModel::insertColumn(const QString &key, int i)
+{
+	if (i < 0 || i > d->worker.columnCount)
+		return;
+
+	d->worker.insertColumn(i, key);
+	d->insertNodeColumn(d->root, i);
+}
+
+void FolderModel::removeColumn(int i)
+{
+	if (i < 0 || i >= d->worker.columnCount)
+		return;
+
+	d->worker.removeColumn(i);
+	d->removeNodeColumn(d->root, i);
+}
 
 /*****************************************************************************/
 
@@ -198,6 +288,8 @@ FolderModelPrivate::FolderModelPrivate(FolderModel *parent)
 	: QObject(parent)
 {
 	q = parent;
+	sortColumn = 0;
+	sortOrder = Qt::AscendingOrder;
 
 	qRegisterMetaType< QList<FolderInfo> >("QList<FolderInfo>");
 
@@ -218,6 +310,58 @@ FolderModelPrivate::~FolderModelPrivate()
 	destroyNode(root);
 }
 
+void FolderModelPrivate::setRootItem(const Link &link)
+{
+	destroyNode(root);
+	worker.flush();
+
+	root = createNode(link, NULL);
+	root->visible = true;
+	root->fetchingChildren = true;
+	worker.fetch(link);
+}
+
+class SortHelper
+{
+public:
+	SortHelper(const QHash<Link, FolderModelPrivate::Node*> &childs, int col,
+	           Qt::SortOrder ord)
+		: children(childs), column(col), order(ord)
+	{
+	}
+
+	bool operator()(const Link &l, const Link &r)
+	{
+		FolderModelPrivate::Node *left = children.value(l);
+		FolderModelPrivate::Node *right = children.value(r);
+
+		// FIXME: folders first (except on MAC)
+		// FIXME: handle individual types for correct results
+		bool result = left->columns.at(column).toString()
+			< right->columns.at(column).toString();
+		return order == Qt::AscendingOrder ? result : !result;
+	}
+
+private:
+	const QHash<Link, FolderModelPrivate::Node*> &children;
+	int column;
+	Qt::SortOrder order;
+};
+
+void FolderModelPrivate::sort()
+{
+	sortNode(root);
+}
+
+void FolderModelPrivate::sortNode(Node *node)
+{
+	SortHelper helper(node->children, sortColumn, sortOrder);
+	qStableSort(node->visibleChildren.begin(), node->visibleChildren.end(), helper);
+
+	foreach(const Link &l, node->visibleChildren)
+		sortNode(node->children.value(l));
+}
+
 FolderModelPrivate::Node *FolderModelPrivate::node(const QModelIndex &index) const
 {
 	if (!index.isValid())
@@ -226,18 +370,21 @@ FolderModelPrivate::Node *FolderModelPrivate::node(const QModelIndex &index) con
 		return static_cast<Node*>(index.internalPointer());
 }
 
-QModelIndex FolderModelPrivate::index(const Node *node) const
+QModelIndex FolderModelPrivate::index(const Node *node, int col) const
 {
 	if (!node->parent || !node->visible)
 		return QModelIndex();
 
 	int row = node->parent->visibleChildren.indexOf(node->link);
 
-	return q->createIndex(row, 0, (void*)node);
+	return q->createIndex(row, col, (void*)node);
 }
 
 void FolderModelPrivate::updateColumns(Node *node, const QList<QVariant> &infos)
 {
+	// FIXME: check if infos has the right number of columns
+	// or better if columns have been changed in between (counter?)
+
 	// the root node is not visible (only its childs)
 	if (!node->parent)
 		return;
@@ -249,12 +396,19 @@ void FolderModelPrivate::updateColumns(Node *node, const QList<QVariant> &infos)
 		QModelIndex topLeft = q->createIndex(row, 0, node);
 		QModelIndex bottomRight = q->createIndex(row, infos.size()-1, node);
 		emit q->dataChanged(topLeft, bottomRight);
+		// TODO: should we trigger a sort?
 	} else {
-		int row = node->parent->visibleChildren.count();
+		QList<Link> tmp = node->parent->visibleChildren;
+		tmp.append(node->link);
+		SortHelper helper(node->parent->children, sortColumn, sortOrder);
+		qStableSort(tmp.begin(), tmp.end(), helper);
+
+		int row = tmp.indexOf(node->link);
+
 		QModelIndex parent = index(node->parent);
 		node->visible = true;
 		q->beginInsertRows(parent, row, row);
-		node->parent->visibleChildren.append(node->link);
+		node->parent->visibleChildren = tmp;
 		q->endInsertRows();
 	}
 }
@@ -372,10 +526,52 @@ void FolderModelPrivate::itemChanged(const Link &item)
 	worker.fetch(item);
 }
 
+void FolderModelPrivate::setNodeColumns(Node *node, const QList<QVariant> &empty)
+{
+	node->columns = empty;
+	worker.fetch(node->link);
+
+	foreach (Node *child, node->children.values())
+		setNodeColumns(child, empty);
+}
+
+void FolderModelPrivate::insertNodeColumn(Node *node, int i)
+{
+	if (!node->visible)
+		return;
+
+	node->columns.insert(i, QVariant());
+	worker.fetch(node->link);
+
+	q->beginInsertColumns(index(node), i, i);
+	foreach (Node *child, node->children.values())
+		insertNodeColumn(child, i);
+	q->endInsertColumns();
+}
+
+void FolderModelPrivate::removeNodeColumn(Node *node, int i)
+{
+	if (!node->visible)
+		return;
+
+	node->columns.removeAt(i);
+	worker.fetch(node->link);
+
+	q->beginRemoveColumns(index(node), i, i);
+	foreach (Node *child, node->children.values())
+		removeNodeColumn(child, i);
+	q->endRemoveColumns();
+}
+
 /*****************************************************************************/
 
 ColumnInfo::~ColumnInfo()
 {
+}
+
+bool ColumnInfo::isSize() const
+{
+	return false;
 }
 
 StatColumnInfo::StatColumnInfo(const QString &key)
@@ -411,6 +607,11 @@ bool StatColumnInfo::editable() const
 	return false;
 }
 
+bool StatColumnInfo::isSize() const
+{
+	return extractor == extractSize;
+}
+
 QVariant StatColumnInfo::extract(const RevInfo &stat, const Value &/*metaData*/) const
 {
 	return extractor(stat);
@@ -418,13 +619,12 @@ QVariant StatColumnInfo::extract(const RevInfo &stat, const Value &/*metaData*/)
 
 QVariant StatColumnInfo::extractSize(const RevInfo &stat)
 {
-	// TODO: KiB, MiB, GiB
-	return QString::number(stat.size());
+	return stat.size();
 }
 
 QVariant StatColumnInfo::extractMTime(const RevInfo &stat)
 {
-	return stat.mtime().toString(Qt::DefaultLocaleShortDate);
+	return stat.mtime();
 }
 
 QVariant StatColumnInfo::extractType(const RevInfo &stat)
@@ -528,6 +728,7 @@ FolderGatherer::FolderGatherer(QObject *parent)
 
 	columns << new MetaColumnInfo("public.item:org.peerdrive.annotation/title");
 	columnCount = 1;
+	columnSizeMask = 0;
 }
 
 FolderGatherer::~FolderGatherer()
@@ -548,6 +749,14 @@ void FolderGatherer::fetch(const Link &item)
 
 	items.push(item);
 	condition.wakeAll();
+}
+
+void FolderGatherer::flush()
+{
+	QMutexLocker locker(&mutex);
+
+	items.clear();
+	infos.clear();
 }
 
 void FolderGatherer::run()
@@ -655,4 +864,71 @@ QString FolderGatherer::columnHeader(int col) const
 {
 	QReadLocker lock(const_cast<QReadWriteLock*>(&columnsLock));
 	return columns[col]->name;
+}
+
+QStringList FolderGatherer::columnDefs() const
+{
+	QReadLocker lock(const_cast<QReadWriteLock*>(&columnsLock));
+
+	QStringList result;
+	for (int i = 0; i < columns.size(); i++)
+		result << columns.at(i)->key;
+
+	return result;
+}
+
+void FolderGatherer::setColumns(const QStringList &cols)
+{
+	QWriteLocker lock(&columnsLock);
+
+	for (int i = 0; i < columns.size(); i++)
+		delete columns.at(i);
+	columns.clear();
+
+	columnCount = 0;
+	columnSizeMask = 0;
+
+	for (int i = 0; i < cols.size(); i++) {
+		QString key = cols.at(i);
+		QStringList splittedKey = key.split(":");
+		if (splittedKey.size() != 2)
+			continue;
+
+		ColumnInfo *col = splittedKey.at(0) == ""
+			? static_cast<ColumnInfo*>(new StatColumnInfo(key))
+			: static_cast<ColumnInfo*>(new MetaColumnInfo(key));
+		columns.append(col);
+
+		columnCount++;
+		if (col->isSize())
+			columnSizeMask |= 1 << i;
+	}
+}
+
+void FolderGatherer::insertColumn(int i, const QString &key)
+{
+	QWriteLocker lock(&columnsLock);
+
+	QStringList splittedKey = key.split(":");
+	ColumnInfo *col = splittedKey.at(0) == ""
+		? static_cast<ColumnInfo*>(new StatColumnInfo(key))
+		: static_cast<ColumnInfo*>(new MetaColumnInfo(key));
+	columns.insert(i, col);
+
+	columnCount++;
+	if (col->isSize())
+		columnSizeMask |= 1 << i;
+}
+
+void FolderGatherer::removeColumn(int i)
+{
+	QWriteLocker lock(&columnsLock);
+
+	delete columns.takeAt(i);
+	columnCount--;
+
+	columnSizeMask = 0;
+	for (int j = 0; j < columnCount; j++)
+		if (columns.at(j)->isSize())
+			columnSizeMask |= 1 << j;
 }

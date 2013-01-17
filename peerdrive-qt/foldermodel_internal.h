@@ -43,6 +43,7 @@ class ColumnInfo {
 public:
 	virtual ~ColumnInfo();
 	virtual bool editable() const = 0;
+	virtual bool isSize() const;
 	virtual QVariant extract(const RevInfo &stat, const Value &metaData) const = 0;
 
 	QString name;
@@ -54,6 +55,7 @@ public:
 	StatColumnInfo(const QString &key);
 	~StatColumnInfo();
 	bool editable() const;
+	bool isSize() const;
 	QVariant extract(const RevInfo &stat, const Value &metaData) const;
 private:
 	QVariant (*extractor)(const RevInfo &stat);
@@ -97,9 +99,15 @@ public:
 	~FolderGatherer();
 
 	void fetch(const Link &item);
+	void flush();
 
 	int columnCount;
+	int columnSizeMask;
 	QString columnHeader(int col) const;
+	QStringList columnDefs() const;
+	void setColumns(const QStringList &cols);
+	void insertColumn(int i, const QString &key);
+	void removeColumn(int i);
 
 signals:
 	void updates(const QList<FolderInfo> &infos);
@@ -156,8 +164,13 @@ public:
 	FolderModelPrivate(FolderModel *parent);
 	~FolderModelPrivate();
 
+	void setRootItem(const Link &link);
 	Node *node(const QModelIndex &index) const;
-	QModelIndex index(const Node *node) const;
+	QModelIndex index(const Node *node, int col = 0) const;
+	void sort();
+	void setNodeColumns(Node *node, const QList<QVariant> &empty);
+	void insertNodeColumn(Node *node, int i);
+	void removeNodeColumn(Node *node, int i);
 
 	FolderModel *q;
 	QMultiHash<Link, Node*> nodes;
@@ -165,12 +178,16 @@ public:
 	FolderGatherer worker;
 	LinkWatcher watch;
 
+	Qt::SortOrder sortOrder;
+	int sortColumn;
+
 private:
 	void updateNode(Node *node, const FolderInfo &info);
 	void updateColumns(Node *node, const QList<QVariant> &infos);
 	void removeChild(Node *node, const Link &link);
 	Node *createNode(const Link &link, Node *parent);
 	void destroyNode(Node *node);
+	void sortNode(Node *node);
 
 private slots:
 	void gotItemInfos(const QList<FolderInfo> &infos);
