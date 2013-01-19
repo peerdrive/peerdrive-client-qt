@@ -55,6 +55,11 @@ public:
 
 Window::Window()
 {
+	deferredClearTimer = new QTimer(this);
+	deferredClearTimer->setSingleShot(true);
+	connect(deferredClearTimer, SIGNAL(timeout()), this,
+		SLOT(deferredHideTrayMenu()));
+
 	fstab = new PeerDrive::FSTab(true, this);
 	if (!fstab->load())
 		qDebug() << "Cannot load sys:/fstab";
@@ -94,7 +99,7 @@ Window::Window()
 	trayIconMenu = new QMenu(this);
 	connect(trayIconMenu, SIGNAL(aboutToShow()), this, SLOT(showTrayMenu()));
 	connect(trayIconMenu, SIGNAL(aboutToHide()), this, SLOT(hideTrayMenu()));
-	hideTrayMenu(); // prime menu
+	trayIconMenuVisible = false;
 
 	trayIcon = new QSystemTrayIcon(this);
 	trayIcon->setContextMenu(trayIconMenu);
@@ -150,10 +155,7 @@ Window::Window()
 
 void Window::showTrayMenu()
 {
-	// clear all menues to save some memory...
-	// TODO: reset the model after some timeout too to save additional memory,
-	// especially when the applet is never closed and used much...
-	trayIconMenu->clear();
+	trayIconMenuVisible = true;
 	trayIconMenu->addSeparator();
 
 	QList<QString> allLabels = fstab->knownLabels();
@@ -180,12 +182,25 @@ void Window::showTrayMenu()
 	QModelIndex root;
 	if (model->rowCount(root) > 0)
 		rowsInserted(root, 0, model->rowCount(root)-1);
+
+	showFolderMenu();
 }
 
 void Window::hideTrayMenu()
 {
-	// The menu is cleared every time. Re-establish the showFolderMenu slot.
-	connect(trayIconMenu, SIGNAL(aboutToShow()), this, SLOT(showFolderMenu()));
+	trayIconMenuVisible = false;
+
+	// Defer menu clearing because the action is activated _after_ the
+	// aboutToHide signal.
+	deferredClearTimer->start();
+}
+
+void Window::deferredHideTrayMenu()
+{
+	// clear all menues to save some memory...
+	// TODO: reset the model after some timeout too to save additional memory,
+	// especially when the applet is never closed and used much...
+	trayIconMenu->clear();
 }
 
 /**
@@ -329,6 +344,10 @@ void Window::showFolderMenu()
 
 QMenu *Window::findMenu(const QModelIndex &index)
 {
+	// menu is cleared every time when it is hidden
+	if (!trayIconMenuVisible)
+		return NULL;
+
 	if (!index.isValid())
 		return trayIconMenu;
 

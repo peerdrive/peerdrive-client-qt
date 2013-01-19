@@ -32,6 +32,7 @@ class QListWidgetItem;
 class QPushButton;
 class QLabel;
 class QVBoxLayout;
+class QTimer;
 
 namespace PeerDrive {
 	class FolderModel;
@@ -56,6 +57,7 @@ private slots:
 	void iconActivated(QSystemTrayIcon::ActivationReason reason);
 	void showTrayMenu();
 	void hideTrayMenu();
+	void deferredHideTrayMenu();
 	void rowsInserted(const QModelIndex &parent, int start, int end);
 	void rowsRemoved(const QModelIndex &parent, int start, int end);
 	void showFolderMenu();
@@ -83,6 +85,7 @@ private:
 
 	QSystemTrayIcon *trayIcon;
 	QMenu *trayIconMenu;
+	bool trayIconMenuVisible;
 	QListWidget *syncRulesList;
 	QPushButton *addSync;
 	QPushButton *editSync;
@@ -95,6 +98,7 @@ private:
 	PeerDrive::ProgressWatcher *progressWatch;
 	QSet<QString> knownMounted;
 	SyncRules *syncRules;
+	QTimer *deferredClearTimer;
 };
 
 #endif
