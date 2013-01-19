@@ -84,10 +84,11 @@ private:
 struct FolderInfo
 {
 	Link link;
-	bool exists;
 	QList<QVariant> columns;
 	QList<Link> childs;
 	QString type;
+	bool exists;
+	bool isFolder;
 };
 
 class FolderGatherer : public QThread
@@ -139,8 +140,8 @@ public:
 	class Node {
 	public:
 		Node(const Link &link, Node *parent)
-			: link(link), parent(parent), visible(false), fetchingChildren(false),
-			  unknownChildren(0), fetched(false)
+			: link(link), parent(parent), unknownChildren(0), visible(false),
+			  fetchingChildren(false), fetched(false)
 		{
 		}
 
@@ -153,12 +154,13 @@ public:
 		Node *parent;
 		QList<Link> visibleChildren;
 		QHash<Link, Node*> children;
+		QList<QVariant> columns;
+		QString type;
+		int unknownChildren;
 		bool visible;
 		bool fetchingChildren;
-		QList<QVariant> columns;
-		int unknownChildren;
 		bool fetched;
-		QString type;
+		bool isFolder;
 	};
 
 	FolderModelPrivate(FolderModel *parent);

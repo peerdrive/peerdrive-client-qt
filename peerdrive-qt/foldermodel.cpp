@@ -335,7 +335,12 @@ public:
 		FolderModelPrivate::Node *left = children.value(l);
 		FolderModelPrivate::Node *right = children.value(r);
 
-		// FIXME: folders first (except on MAC)
+		// folders first (except on MAC)
+#ifndef Q_OS_MAC
+		if (left->isFolder ^ right->isFolder)
+			return left->isFolder;
+#endif
+
 		// FIXME: handle individual types for correct results
 		bool result = left->columns.at(column).toString()
 			< right->columns.at(column).toString();
@@ -508,6 +513,7 @@ void FolderModelPrivate::updateNode(Node *node, const FolderInfo &info)
 		// put the update at the end because the view will check for our childs
 		// via hasChildren()
 		node->type = info.type;
+		node->isFolder = info.isFolder;
 		updateColumns(node, info.columns);
 	} else if (node->visible && node->parent) {
 		// visible node vanished
@@ -810,13 +816,15 @@ void FolderGatherer::getItemInfos(const Link &item)
 			if (Registry::instance().conformes(file.type(), "org.peerdrive.folder")
 				&& file.readAll(Part::PDSD, tmp) > 0) {
 
+				info.isFolder = true;
 				Value folder = Value::fromByteArray(tmp, item.store());
 				for (int i = 0; i < folder.size(); i++) {
 					Link l = folder[i][""].asLink();
 					l.update();
 					info.childs.append(l);
 				}
-			}
+			} else
+				info.isFolder = false;
 
 			if (file.readAll(Part::META, tmp) > 0)
 				meta = Value::fromByteArray(tmp, item.store());
@@ -841,6 +849,7 @@ void FolderGatherer::getRootInfos()
 	info.link = LinkWatcher::rootDoc;
 	info.exists = true;
 	info.type = "org.peerdrive.store";
+	info.isFolder = true;
 
 	Mounts mounts;
 	foreach (Mounts::Store *s, mounts.regularStores()) {
