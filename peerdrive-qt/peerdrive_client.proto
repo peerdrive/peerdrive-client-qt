@@ -1,5 +1,6 @@
 
 package PeerDrive;
+option optimize_for = LITE_RUNTIME;
 
 enum ErrorCode {
 	ERR_ECONFLICT = 0;
