@@ -155,6 +155,11 @@ Window::Window()
 
 void Window::showTrayMenu()
 {
+	// Stupid workaround for the Unity desktop where we never get aboutToHide
+	// signals... m(
+	if (trayIconMenuVisible)
+		return;
+
 	trayIconMenuVisible = true;
 	trayIconMenu->addSeparator();
 
