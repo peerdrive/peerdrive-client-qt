@@ -7,6 +7,9 @@ DEFINES += ICON_PATH=\\\"$$ICON_PATH\\\"
 
 QMAKE_CXXFLAGS += -ffunction-sections
 QMAKE_CXXFLAGS += -fdata-sections
-QMAKE_LFLAGS += -Wl,-gc-sections
 
-QMAKE_LFLAGS_DEBUG += -Wl,-rpath=$$PWD/peerdrive-qt/
+!macx:QMAKE_LFLAGS += -Wl,-gc-sections
+macx: QMAKE_LFLAGS += -dead_strip -dead_strip_dylibs
+
+!macx:QMAKE_LFLAGS_DEBUG += -Wl,-rpath=$$PWD/peerdrive-qt/
+macx: QMAKE_LFLAGS_DEBUG += -Wl,-rpath,$$PWD/peerdrive-qt/
