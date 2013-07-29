@@ -15,3 +15,7 @@ SOURCES += foldermodel.cpp
 LIBS += -lprotobuf
 PROTOS = peerdrive_client.proto
 include(protobuf.pri)
+
+macx:debug {
+	QMAKE_POST_LINK = install_name_tool -id "@rpath/libpeerdrive-qt.1.dylib" $(TARGET)
+}
