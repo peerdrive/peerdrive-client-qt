@@ -72,6 +72,9 @@
 #define PROGRESS_END_MSG    0x028
 #define PROGRESS_QUERY_MSG  0x029
 #define WALK_PATH_MSG       0x02a
+#define GET_DATA_MSG        0x02b
+#define SET_DATA_MSG        0x02c
+#define GET_LINKS_MSG       0x02d
 
 namespace PeerDrive {
 
@@ -199,6 +202,8 @@ private:
 	Connection();
 	~Connection();
 	void sendInit();
+
+	QString m_cookie;
 
 	QMap<DId, QList<LinkWatcher*> > m_docWatches;
 	QMap<RId, QList<LinkWatcher*> > m_revWatches;

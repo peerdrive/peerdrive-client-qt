@@ -732,7 +732,7 @@ FolderGatherer::FolderGatherer(QObject *parent)
 	abort = false;
 	start(LowPriority);
 
-	columns << new MetaColumnInfo("public.item:org.peerdrive.annotation/title");
+	columns << new MetaColumnInfo("public.item:title");
 	columnCount = 1;
 	columnSizeMask = 0;
 }
@@ -800,8 +800,9 @@ void FolderGatherer::run()
 
 void FolderGatherer::getItemInfos(const Link &item)
 {
+	DId store(item.store());
 	FolderInfo info;
-	RevInfo stat(item.rev(), QList<DId>() << item.store());
+	RevInfo stat(item.rev(), QList<DId>() << store);
 	Document file(item);
 
 	info.link = item;
@@ -812,22 +813,16 @@ void FolderGatherer::getItemInfos(const Link &item)
 			QByteArray tmp;
 			Value meta;
 
-			// Hmm, extend RevInfo with DocLinks and RevLinks?
-			if (Registry::instance().conformes(file.type(), "org.peerdrive.folder")
-				&& file.readAll(Part::PDSD, tmp) > 0) {
+			info.isFolder = Registry::instance().conformes(file.type(),
+				"org.peerdrive.folder");
 
-				info.isFolder = true;
-				Value folder = Value::fromByteArray(tmp, item.store());
-				for (int i = 0; i < folder.size(); i++) {
-					Link l = folder[i][""].asLink();
-					l.update();
-					info.childs.append(l);
-				}
-			} else
-				info.isFolder = false;
+			LinkInfo linkInfo(item.rev(), QList<DId>() << store);
+			foreach(const DId &doc, linkInfo.docLinks())
+				info.childs.append(Link(store, doc));
+			foreach(const RId &rev, linkInfo.revLinks())
+				info.childs.append(Link(store, rev));
 
-			if (file.readAll(Part::META, tmp) > 0)
-				meta = Value::fromByteArray(tmp, item.store());
+			meta = file.get("/org.peerdrive.annotation");
 
 			QReadLocker lock(&columnsLock);
 			for (int i = 0; i < columns.size(); i++)

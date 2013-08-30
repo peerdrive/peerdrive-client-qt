@@ -31,19 +31,89 @@ namespace PeerDrive {
 	class DId;
 	class RId;
 	class PId;
-	class Part;
 	class Link;
 }
 
 uint qHash(const PeerDrive::DId&);
 uint qHash(const PeerDrive::RId&);
 uint qHash(const PeerDrive::PId&);
-uint qHash(const PeerDrive::Part&);
 uint qHash(const PeerDrive::Link&);
 
 namespace PeerDrive {
 
-class EnumCnf_Store;
+class EnumCnf_Store; // FIXME: remove from here
+
+// TODO: derive from Exception, add what()
+class ValueError
+{
+};
+
+class ValueData;
+
+class Value {
+public:
+	enum Type
+	{
+		NUL,
+		INT,
+		UINT,
+		FLOAT,
+		DOUBLE,
+		STRING,
+		BOOL,
+		LIST,
+		DICT,
+		LINK
+	};
+
+	Value(Type type = NUL);
+	Value(int value);
+	Value(unsigned int value);
+	Value(qint64 value );
+	Value(quint64 value );
+	Value(float value);
+	Value(double value);
+	Value(const QString &value);
+	Value(bool value);
+	Value(const Link &link);
+	Value(const Value &other);
+	~Value();
+
+	Value &operator=( const Value &other );
+
+	Type type() const;
+	inline bool isNull() { return type() == NUL; }
+
+	QString asString() const;
+	int asInt() const;
+	unsigned int asUInt() const;
+	qint64 asInt64() const;
+	quint64 asUInt64() const;
+	float asFloat() const;
+	double asDouble() const;
+	bool asBool() const;
+	Link asLink() const;
+
+	int size() const;
+	Value &operator[]( int index );
+	const Value& operator[](int index) const;
+	void append( const Value &value );
+	void remove(int index);
+
+	Value &operator[]( const QString &key );
+	const Value& operator[](const QString &key) const;
+	bool contains(const QString &key) const;
+	Value get(const QString &key, const Value &defaultValue = Value()) const;
+	void remove(const QString &key);
+	QList<QString> keys() const;
+
+	static Value fromByteArray(const QByteArray &data, const DId &store);
+	QByteArray toByteArray() const;
+
+private:
+	QSharedDataPointer<ValueData> d;
+};
+
 
 class DId {
 public:
@@ -88,26 +158,6 @@ public:
 	bool operator== (const PId &other) const { return id == other.id; }
 	bool operator!= (const PId &other) const { return id != other.id; }
 	bool operator< (const PId &other) const { return id < other.id; }
-
-private:
-	QByteArray id;
-};
-
-class Part {
-public:
-	Part() { }
-	Part(const QByteArray &ba) : id(ba) { }
-	Part(const std::string &str) { id = QByteArray(str.c_str(), str.size()); }
-	std::string toStdString() const { return std::string(id.constData(), id.size()); }
-	QByteArray toByteArray() const { return id; }
-
-	bool operator== (const Part &other) const { return id == other.id; }
-	bool operator!= (const Part &other) const { return id != other.id; }
-	bool operator< (const Part &other) const { return id < other.id; }
-
-	static const Part FILE;
-	static const Part META;
-	static const Part PDSD;
 
 private:
 	QByteArray id;
@@ -180,7 +230,7 @@ public:
 		DISAPPEARED
 	};
 
-	static Link rootDoc;
+	static const Link rootDoc;
 
 signals:
 	void modified(const Link &item);
@@ -282,9 +332,11 @@ public:
 	QList<DId> stores() const;
 	int flags() const;
 	quint64 size() const;
-	quint64 size(const Part &part) const;
-	PId hash(const Part &part) const;
-	QList<Part> parts() const;
+	quint64 dataSize() const;
+	quint64 attachmentSize(const QString &attachment) const;
+	PId dataHash() const;
+	PId attachmentHash(const QString &attachment) const;
+	QList<QString> attachments() const;
 	QList<RId> parents() const;
 	QDateTime mtime() const;
 	QString type() const;
@@ -302,8 +354,10 @@ private:
 	QString m_type;
 	QString m_creator;
 	QString m_comment;
-	QMap<Part, quint64> m_partSizes;
-	QMap<Part, PId> m_partHashes;
+	quint64 m_dataSize;
+	PId m_dataHash;
+	QMap<QString, quint64> m_attachmentSizes;
+	QMap<QString, PId> m_attachmentHashes;
 };
 
 class DocInfo {
@@ -332,6 +386,26 @@ private:
 	QMap<DId, QList<Link> > m_stores; // store -> revs ++ preRevs
 	QMap<RId, QList<DId> > m_revs; // revs -> stores
 	QMap<RId, QList<DId> > m_preRevs; // preRevs -> stores
+};
+
+class LinkInfo {
+public:
+	LinkInfo();
+	LinkInfo(const RId &rev);
+	LinkInfo(const RId &rev, const QList<DId> &stores);
+
+	int error() const;
+
+	QList<DId> docLinks() const;
+	QList<RId> revLinks() const;
+
+private:
+	void fetch(const RId &rev, const QList<DId> *stores);
+
+	bool m_exists;
+	int m_error;
+	QList<DId> m_docLinks;
+	QList<RId> m_revLinks;
 };
 
 /**
@@ -364,20 +438,35 @@ public:
 	bool forward(const RId &toRev, const DId &srcStore,
 		QDateTime depth=QDateTime(), bool verbose=false);
 
-	qint64 pos(const Part &part) const;
-	bool seek(const Part &part, qint64 pos);
+	/*
+	 * Structured data
+	 */
 
-	qint64 read(const Part &part, char *data, qint64 maxSize);
-	qint64 read(const Part &part, QByteArray &data, qint64 maxSize);
-	qint64 readAll(const Part &part, QByteArray &data);
+	Value get(const QString &selector);
+	bool set(const QString &selector, const Value &value);
 
-	bool write(const Part &part, const char *data, qint64 size);
-	bool write(const Part &part, const char *data);
-	bool write(const Part &part, const QByteArray &data);
-	bool writeAll(const Part &part, const char *data, qint64 size);
-	bool writeAll(const Part &part, const char *data);
-	bool writeAll(const Part &part, const QByteArray &data);
-	bool resize(const Part &part, qint64 size);
+	/*
+	 * Attachments
+	 */
+
+	qint64 read(const QString &attachment, char *data, qint64 maxSize);
+	qint64 read(const QString &attachment, QByteArray &data, qint64 maxSize);
+	qint64 readAll(const QString &attachment, QByteArray &data);
+
+	bool write(const QString &attachment, const char *data, qint64 size);
+	bool write(const QString &attachment, const char *data);
+	bool write(const QString &attachment, const QByteArray &data);
+	bool writeAll(const QString &attachment, const char *data, qint64 size);
+	bool writeAll(const QString &attachment, const char *data);
+	bool writeAll(const QString &attachment, const QByteArray &data);
+	bool resize(const QString &attachment, qint64 size);
+
+	qint64 pos(const QString &attachment) const;
+	bool seek(const QString &attachment, qint64 pos);
+
+	/*
+	 * Metadata
+	 */
 
 	unsigned int flags() const;
 	bool setFlags(unsigned int flags);
@@ -392,13 +481,13 @@ public:
 	bool suspend(const QString &comment = QString());
 
 private:
-	qint64 read(const Part &part, char *data, qint64 maxSize, qint64 off);
+	qint64 read(const QString &attachment, char *data, qint64 maxSize, qint64 off);
 
 	bool m_open;
 	unsigned int m_handle;
 	int m_error;
 	Link m_link;
-	QMap<Part, qint64> m_pos;
+	QMap<QString, qint64> m_pos;
 	mutable QString m_type;
 };
 
@@ -407,7 +496,6 @@ private:
 Q_DECLARE_METATYPE(PeerDrive::DId);
 Q_DECLARE_METATYPE(PeerDrive::RId);
 Q_DECLARE_METATYPE(PeerDrive::PId);
-Q_DECLARE_METATYPE(PeerDrive::Part);
 Q_DECLARE_METATYPE(PeerDrive::Link);
 
 #endif

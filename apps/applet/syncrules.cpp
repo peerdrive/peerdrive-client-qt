@@ -50,20 +50,8 @@ bool SyncRules::load()
 		return false;
 
 	try {
-		QByteArray tmp;
-		if (file.readAll(PeerDrive::Part::PDSD, tmp) < 0)
-			return false;
-		rules = PeerDrive::Value::fromByteArray(tmp, link.store());
+		rules = file.get("/org.peerdrive.syncrules");
 		changed = false;
-
-		{
-			QByteArray t2 = rules.toByteArray();
-			if (tmp != t2) {
-				qDebug() << "save mismatch" << tmp.toHex() << t2.toHex();
-				return false;
-			}
-		}
-
 	} catch (PeerDrive::ValueError&) {
 		return false;
 	}
@@ -80,17 +68,7 @@ bool SyncRules::save() const
 	if (!file.update())
 		return false;
 
-	{
-		QByteArray t1 = rules.toByteArray();
-		PeerDrive::Value v = PeerDrive::Value::fromByteArray(t1, PeerDrive::DId());
-		QByteArray t2 = v.toByteArray();
-		if (t1 != t2) {
-			qDebug() << "save mismatch" << t1.toHex() << t2.toHex();
-			return false;
-		}
-	}
-
-	if (!file.writeAll(PeerDrive::Part::PDSD, rules.toByteArray()))
+	if (!file.set("/org.peerdrive.syncrules", rules))
 		return false;
 
 	if (!file.commit())

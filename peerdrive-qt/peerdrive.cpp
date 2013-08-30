@@ -18,6 +18,7 @@
 
 #include <QtDebug>
 #include <QtEndian>
+#include <QFile>
 #include <QProcessEnvironment>
 #include <stdexcept>
 
@@ -278,26 +279,62 @@ void Connection::run()
 	QObject::connect(handler, SIGNAL(indication(QByteArray)), this,
 		SLOT(dispatchIndication(QByteArray)), Qt::QueuedConnection);
 
-	QString hostName = "127.0.0.1";
-	quint16 port = 4567;
-
+	// first look into the environment
 	QString address = QProcessEnvironment::systemEnvironment().value("PEERDRIVE");
-	if (!address.isEmpty()) {
-		QStringList addrParts = address.split(":");
-		switch (addrParts.size()) {
-			case 2:
-				port = addrParts.at(1).toInt();
-				/* fall through */
-			case 1:
-				hostName = addrParts.at(0);
-				/* fall through */
+
+	// then look for per-user daemon
+	if (address.isEmpty()) {
+		// FIXME: add Windows
+		QString path = QString("/tmp/peerdrive-%1/server.info").arg(
+			QProcessEnvironment::systemEnvironment().value("USER"));
+
+		QFile file(path);
+		if (file.open(QIODevice::ReadOnly | QIODevice::Text))
+			address = file.readLine().trimmed();
+	}
+
+	// look for system daemon as last resort
+	if (address.isEmpty()) {
+		// FIXME: add Windows
+		QFile file("/var/run/peerdrive/server.info");
+		if (file.open(QIODevice::ReadOnly | QIODevice::Text))
+			address = file.readLine().trimmed();
+	}
+
+	// do we have an address?
+	if (address.isEmpty()) {
+		qDebug() << "::PeerDrive::Connection: don't know where to find a server";
+		goto run;
+	}
+
+	if (!address.startsWith("tcp://")) {
+		qDebug() << "::PeerDrive::Connection: unknown address scheme: " << address;
+		goto run;
+	}
+
+	{
+		QStringList urlParts = address.mid(6).split("/");
+		if (urlParts.size() == 2) {
+			QStringList addrParts = urlParts.at(0).split(":");
+			if (addrParts.size() == 2) {
+				QString hostName = addrParts.at(0);
+				quint16 port = addrParts.at(1).toInt();
+
+				m_cookie = urlParts.at(1);
+
+				int err = handler->connect(hostName, port);
+				if (err)
+					qDebug() << "::PeerDrive::Connection: connection failed:" << err;
+			} else {
+				qDebug() << "::PeerDrive::Connection: malformed host: "
+				         << urlParts.at(0);
+			}
+		} else {
+			qDebug() << "::PeerDrive::Connection: malformed url: " << address;
 		}
 	}
 
-	int err = handler->connect(hostName, port);
-	if (err)
-		qDebug() << "::PeerDrive::Connection: connection failed:" << err;
-
+run:
 	startupDone.wakeAll();
 	exec();
 	delete handler;
@@ -309,8 +346,10 @@ void Connection::sendInit()
 	InitCnf cnf;
 	QByteArray rawReq, rawCnf;
 
-	req.set_major(0);
+	req.set_major(1);
 	req.set_minor(0);
+	QByteArray cookie = QByteArray::fromHex(m_cookie.toLatin1());
+	req.set_cookie(cookie.constData(), cookie.size());
 
 	rawReq.resize(req.ByteSize());
 	req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
@@ -326,7 +365,7 @@ void Connection::sendInit()
 		goto failed;
 	}
 
-	if (cnf.major() != 0 || cnf.minor() != 0) {
+	if (cnf.major() != 1 || cnf.minor() != 0) {
 		qDebug() << "::PeerDrive::Connection: unsupported server version:" <<
 			cnf.major() << ":" << cnf.minor();
 		err = ERR_ERPCMISMATCH;
@@ -721,15 +760,6 @@ uint qHash(const PeerDrive::PId &id)
 	return qHash(id.toByteArray());
 }
 
-uint qHash(const PeerDrive::Part &id)
-{
-	return qHash(id.toByteArray());
-}
-
-const Part Part::FILE(QByteArray("FILE"));
-const Part Part::META(QByteArray("META"));
-const Part Part::PDSD(QByteArray("PDSD"));
-
 /****************************************************************************/
 
 Link::Link()
@@ -917,6 +947,9 @@ bool Link::operator== (const Link &other) const
 		case REV:
 			return m_rev == other.m_rev;
 	}
+
+	// not reached; make compiler happy
+	return false;
 }
 
 bool Link::operator< (const Link &other) const
@@ -962,7 +995,7 @@ uint qHash(const PeerDrive::Link &link)
 
 /****************************************************************************/
 
-Link LinkWatcher::rootDoc = Link(DId(QByteArray(16, 0)), DId(QByteArray(16, 0)), RId());
+const Link LinkWatcher::rootDoc = Link(DId(QByteArray(16, 0)), DId(QByteArray(16, 0)), RId());
 
 LinkWatcher::LinkWatcher(QObject *parent)
 	: QObject(parent)
@@ -1251,6 +1284,8 @@ int Mounts::unmount(const DId &sid)
 /****************************************************************************/
 
 RevInfo::RevInfo()
+	: m_exists(false)
+	, m_error(0)
 {
 }
 
@@ -1284,11 +1319,13 @@ void RevInfo::fetch(const RId &rid, const QList<DId> *stores)
 		return;
 
 	m_flags = cnf.flags();
-	for (int j = 0; j < cnf.parts_size(); j++) {
-		const StatCnf_Part & p = cnf.parts(j);
-		Part part(p.fourcc());
-		m_partSizes[part] = p.size();
-		m_partHashes[part] = PId(p.pid());
+	m_dataSize = cnf.data().size();
+	m_dataHash = PId(cnf.data().hash());
+	for (int j = 0; j < cnf.attachments_size(); j++) {
+		const StatCnf_Attachment & a = cnf.attachments(j);
+		QString name(a.name().c_str());
+		m_attachmentSizes[name] = a.size();
+		m_attachmentHashes[name] = PId(a.hash());
 	}
 	for (int j = 0; j < cnf.parents_size(); j++) {
 		RId rid(cnf.parents(j));
@@ -1318,27 +1355,37 @@ int RevInfo::flags() const
 
 quint64 RevInfo::size() const
 {
-	quint64 sum = 0;
-	for (QMap<Part, quint64>::const_iterator i = m_partSizes.constBegin();
-	     i != m_partSizes.constEnd(); i++)
+	quint64 sum = m_dataSize;
+	for (QMap<QString, quint64>::const_iterator i = m_attachmentSizes.constBegin();
+	     i != m_attachmentSizes.constEnd(); ++i)
 		sum += i.value();
 
 	return sum;
 }
 
-quint64 RevInfo::size(const Part &part) const
+quint64 RevInfo::dataSize() const
 {
-	return m_partSizes[part];
+	return m_dataSize;
 }
 
-PId RevInfo::hash(const Part &part) const
+quint64 RevInfo::attachmentSize(const QString &attachment) const
 {
-	return m_partHashes[part];
+	return m_attachmentSizes[attachment];
 }
 
-QList<Part> RevInfo::parts() const
+PId RevInfo::dataHash() const
 {
-	return m_partSizes.keys();
+	return m_dataHash;
+}
+
+PId RevInfo::attachmentHash(const QString &attachment) const
+{
+	return m_attachmentHashes[attachment];
+}
+
+QList<QString> RevInfo::attachments() const
+{
+	return m_attachmentSizes.keys();
 }
 
 QList<RId> RevInfo::parents() const
@@ -1369,6 +1416,7 @@ QString RevInfo::comment() const
 /****************************************************************************/
 
 DocInfo::DocInfo()
+	: m_error(0)
 {
 }
 
@@ -1509,6 +1557,70 @@ QList<Link> DocInfo::preliminaryHeads(const DId &store) const
 
 /****************************************************************************/
 
+LinkInfo::LinkInfo()
+	: m_exists(false)
+	, m_error(0)
+{
+}
+
+LinkInfo::LinkInfo(const RId &rev)
+{
+	fetch(rev, NULL);
+}
+
+LinkInfo::LinkInfo(const RId &rev, const QList<DId> &stores)
+{
+	fetch(rev, &stores);
+}
+
+void LinkInfo::fetch(const RId &rev, const QList<DId> *stores)
+{
+	GetLinksReq req;
+	GetLinksCnf cnf;
+
+	m_exists = false;
+	m_docLinks.clear();
+	m_revLinks.clear();
+
+	req.set_rev(rev.toStdString());
+	if (stores) {
+		QList<DId>::const_iterator i;
+		for (i = stores->constBegin(); i != stores->constEnd(); ++i)
+			req.add_stores((*i).toStdString());
+	}
+
+	m_error = Connection::defaultRPC<GetLinksReq, GetLinksCnf>(GET_LINKS_MSG, req, cnf);
+	if (m_error)
+		return;
+
+	m_docLinks.reserve(cnf.doc_links_size());
+	for (int i = 0; i < cnf.doc_links_size(); i++)
+		m_docLinks.append(DId(cnf.doc_links(i)));
+
+	m_revLinks.reserve(cnf.rev_links_size());
+	for (int i = 0; i < cnf.rev_links_size(); i++)
+		m_revLinks.append(RId(cnf.rev_links(i)));
+
+	m_exists = true;
+}
+
+int LinkInfo::error() const
+{
+	return m_error;
+}
+
+QList<DId> LinkInfo::docLinks() const
+{
+	return m_docLinks;
+}
+
+QList<RId> LinkInfo::revLinks() const
+{
+	return m_revLinks;
+}
+
+/****************************************************************************/
+
 
 Document::Document()
 {
@@ -1619,21 +1731,62 @@ bool Document::resume(const QString &creator)
 	return true;
 }
 
-qint64 Document::pos(const Part &part) const
+Value Document::get(const QString &selector)
 {
-	return m_pos.value(part, 0);
+	if (!m_open) {
+		m_error = ERR_EBADF;
+		return Value();
+	}
+
+	GetDataReq req;
+	GetDataCnf cnf;
+	req.set_handle(m_handle);
+	req.set_selector(selector.toStdString());
+
+	m_error = Connection::defaultRPC<GetDataReq, GetDataCnf>(GET_DATA_MSG, req, cnf);
+	if (m_error)
+		return Value();
+
+	QByteArray data = QByteArray::fromRawData(cnf.data().data(), cnf.data().length());
+	return Value::fromByteArray(data, m_link.store());
 }
 
-bool Document::seek(const Part &part, qint64 pos)
+bool Document::set(const QString &selector, const Value &value)
+{
+	if (!m_open) {
+		m_error = ERR_EBADF;
+		return false;
+	}
+
+	QByteArray data = value.toByteArray();
+
+	SetDataReq req;
+	req.set_handle(m_handle);
+	req.set_selector(selector.toStdString());
+	req.set_data(data.constData(), data.size());
+
+	m_error = Connection::defaultRPC<SetDataReq>(GET_DATA_MSG, req);
+	if (m_error)
+		return false;
+
+	return true;
+}
+
+qint64 Document::pos(const QString &attachment) const
+{
+	return m_pos.value(attachment, 0);
+}
+
+bool Document::seek(const QString &attachment, qint64 pos)
 {
 	if (!m_open || pos < 0)
 		return false;
 
-	m_pos[part] = pos;
+	m_pos[attachment] = pos;
 	return true;
 }
 
-qint64 Document::read(const Part &part, char *data, qint64 maxSize, qint64 off)
+qint64 Document::read(const QString &attachment, char *data, qint64 maxSize, qint64 off)
 {
 	if (!m_open) {
 		m_error = ERR_EBADF;
@@ -1650,7 +1803,7 @@ qint64 Document::read(const Part &part, char *data, qint64 maxSize, qint64 off)
 		ReadCnf cnf;
 
 		req.set_handle(m_handle);
-		req.set_part(part.toStdString());
+		req.set_part(attachment.toStdString());
 		req.set_offset(off);
 		req.set_length(chunk);
 		m_error = Connection::defaultRPC<ReadReq, ReadCnf>(READ_MSG, req, cnf);
@@ -1670,21 +1823,21 @@ qint64 Document::read(const Part &part, char *data, qint64 maxSize, qint64 off)
 	return len;
 }
 
-qint64 Document::read(const Part &part, char *data, qint64 maxSize)
+qint64 Document::read(const QString &attachment, char *data, qint64 maxSize)
 {
-	qint64 off = pos(part);
-	qint64 len = read(part, data, maxSize, off);
+	qint64 off = pos(attachment);
+	qint64 len = read(attachment, data, maxSize, off);
 	if (len > 0)
-		m_pos[part] = off + len;
+		m_pos[attachment] = off + len;
 
 	return len;
 }
 
-qint64 Document::read(const Part &part, QByteArray &data, qint64 maxSize)
+qint64 Document::read(const QString &attachment, QByteArray &data, qint64 maxSize)
 {
 	data.resize(maxSize);
 
-	qint64 actual = read(part, data.data(), maxSize);
+	qint64 actual = read(attachment, data.data(), maxSize);
 
 	if (actual < 0)
 		data.resize(0);
@@ -1694,7 +1847,7 @@ qint64 Document::read(const Part &part, QByteArray &data, qint64 maxSize)
 	return actual;
 }
 
-qint64 Document::readAll(const Part &part, QByteArray &data)
+qint64 Document::readAll(const QString &attachment, QByteArray &data)
 {
 	QByteArray tmp;
 
@@ -1704,7 +1857,7 @@ qint64 Document::readAll(const Part &part, QByteArray &data)
 	qint64 off = 0;
 	qint64 len;
 	do {
-		len = read(part, tmp.data(), 0x10000, off);
+		len = read(attachment, tmp.data(), 0x10000, off);
 		if (len < 0) {
 			data.resize(0);
 			return len;
@@ -1718,7 +1871,7 @@ qint64 Document::readAll(const Part &part, QByteArray &data)
 	return off;
 }
 
-bool Document::write(const Part &part, const char *data, qint64 size)
+bool Document::write(const QString &attachment, const char *data, qint64 size)
 {
 	if (!m_open) {
 		m_error = ERR_EBADF;
@@ -1733,7 +1886,7 @@ bool Document::write(const Part &part, const char *data, qint64 size)
 		WriteBufferReq req;
 
 		req.set_handle(m_handle);
-		req.set_part(part.toStdString());
+		req.set_part(attachment.toStdString());
 		req.set_data(data, mps);
 		m_error = Connection::defaultRPC<WriteBufferReq>(WRITE_BUFFER_MSG, req);
 		if (m_error)
@@ -1745,54 +1898,54 @@ bool Document::write(const Part &part, const char *data, qint64 size)
 
 	// commit the last chunk
 	WriteCommitReq req;
-	qint64 off = pos(part);
+	qint64 off = pos(attachment);
 
 	req.set_handle(m_handle);
-	req.set_part(part.toStdString());
+	req.set_part(attachment.toStdString());
 	req.set_offset(off);
 	req.set_data(data, size-len);
 	m_error = Connection::defaultRPC<WriteCommitReq>(WRITE_COMMIT_MSG, req);
 	if (m_error)
 		return false;
 
-	m_pos[part] = off+size;
+	m_pos[attachment] = off+size;
 	return true;
 }
 
-bool Document::write(const Part &part, const char *data)
+bool Document::write(const QString &attachment, const char *data)
 {
-	return write(part, data, qstrlen(data));
+	return write(attachment, data, qstrlen(data));
 }
 
-bool Document::write(const Part &part, const QByteArray &data)
+bool Document::write(const QString &attachment, const QByteArray &data)
 {
-	return write(part, data.constData(), data.size());
+	return write(attachment, data.constData(), data.size());
 }
 
-bool Document::writeAll(const Part &part, const char *data, qint64 size)
+bool Document::writeAll(const QString &attachment, const char *data, qint64 size)
 {
 	// wipe out completely to be nice to COW
-	if (!resize(part, 0))
+	if (!resize(attachment, 0))
 		return false;
 
 	// announce what are about to write
-	if (!resize(part, size))
+	if (!resize(attachment, size))
 		return false;
 
-	return write(part, data, size);
+	return write(attachment, data, size);
 }
 
-bool Document::writeAll(const Part &part, const char *data)
+bool Document::writeAll(const QString &attachment, const char *data)
 {
-	return writeAll(part, data, qstrlen(data));
+	return writeAll(attachment, data, qstrlen(data));
 }
 
-bool Document::writeAll(const Part &part, const QByteArray &data)
+bool Document::writeAll(const QString &attachment, const QByteArray &data)
 {
-	return writeAll(part, data.constData(), data.size());
+	return writeAll(attachment, data.constData(), data.size());
 }
 
-bool Document::resize(const Part &part, qint64 size)
+bool Document::resize(const QString &attachment, qint64 size)
 {
 	if (!m_open) {
 		m_error = ERR_EBADF;
@@ -1801,7 +1954,7 @@ bool Document::resize(const Part &part, qint64 size)
 
 	TruncReq req;
 	req.set_handle(m_handle);
-	req.set_part(part.toStdString());
+	req.set_part(attachment.toStdString());
 	req.set_offset(size);
 
 	m_error = Connection::defaultRPC<TruncReq>(TRUNC_MSG, req);
