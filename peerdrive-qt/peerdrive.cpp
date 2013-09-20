@@ -843,10 +843,15 @@ bool Link::update()
 	return false;
 }
 
-bool Link::update(DId &newStore)
+bool Link::update(const DId &newStore)
 {
 	m_store = newStore;
 	return update();
+}
+
+void Link::setStore(const DId &newStore)
+{
+	m_store = newStore;
 }
 
 bool Link::isValid() const

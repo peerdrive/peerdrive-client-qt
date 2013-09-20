@@ -325,7 +325,8 @@ public:
 	bool operator< (const Link &other) const;
 
 	bool update();
-	bool update(DId &newStore);
+	bool update(const DId &newStore);
+	void setStore(const DId &newStore);
 
 	bool isValid() const;
 	bool isRevLink() const;
