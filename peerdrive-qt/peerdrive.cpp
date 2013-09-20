@@ -30,7 +30,7 @@
 #define FLAG_IND	2
 #define FLAG_RSP	3
 
-//#define TRACE_LEVEL 1
+//#define TRACE_LEVEL 3
 
 #ifdef TRACE_LEVEL
 static const char *msg_names[] = {
@@ -77,6 +77,9 @@ static const char *msg_names[] = {
 	"PROGRESS_END_MSG",
 	"PROGRESS_QUERY_MSG",
 	"WALK_PATH_MSG",
+	"GET_DATA_MSG",
+	"SET_DATA_MSG",
+	"GET_LINKS_MSG",
 };
 #endif
 
@@ -130,6 +133,17 @@ Error ConnectionHandler::sendReq(int msg, Completion *completion, const QByteArr
 
 	quint32 ref = nextRef++;
 	pendingCompletions.insert(ref, completion);
+
+#if TRACE_LEVEL >= 1
+	qDebug() << "REQ" << msg_names[msg]
+#if TRACE_LEVEL >= 2
+		<< ref << req.size()
+#if TRACE_LEVEL >= 3
+		<< req.left(64).toHex()
+#endif
+#endif
+		;
+#endif
 
 	uchar header[8];
 	qToBigEndian((quint16)(6 + req.size()), header);
@@ -190,6 +204,17 @@ void ConnectionHandler::sockReadyRead()
 		msg >>= 4;
 
 		QMutexLocker locker(&mutex);
+
+#if TRACE_LEVEL >= 1
+		qDebug() << "cnf" << msg_names[msg]
+#if TRACE_LEVEL >= 2
+			<< ref << len
+#if TRACE_LEVEL >= 3
+			<< m_buf.mid(8, len).left(64).toHex()
+#endif
+#endif
+			;
+#endif
 
 		if (type == FLAG_CNF && pendingCompletions.contains(ref)) {
 			Completion *c = pendingCompletions.take(ref);
@@ -401,10 +426,6 @@ Error Connection::rpc(int msg, const QByteArray &req)
 
 Error Connection::_rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion)
 {
-#if TRACE_LEVEL >= 1
-	qDebug() << msg_names[msg];
-#endif
-
 	Error ret = handler->sendReq(msg, completion, req);
 	if (ret)
 		return ret;
