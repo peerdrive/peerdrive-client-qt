@@ -112,14 +112,14 @@ void ProgressWidget::progressChange(unsigned int tag)
 	oldState = watcher->state(tag);
 
 	bool isSync = watcher->type(tag) == PeerDrive::ProgressWatcher::Synchronization;
-	bool isErr = watcher->state(tag) == PeerDrive::ProgressWatcher::Error;
+	bool isErr = watcher->state(tag) == PeerDrive::ProgressWatcher::StateError;
 	progressBar->setEnabled(!isErr);
 	skipBtn->setVisible(isErr);
 
 	QString msg, rawMsg;
 
 	switch (oldState) {
-		case PeerDrive::ProgressWatcher::Running:
+		case PeerDrive::ProgressWatcher::StateRunning:
 			if (isSync)
 				msg = "Synchronizing %1 and %2";
 			else
@@ -129,7 +129,7 @@ void ProgressWidget::progressChange(unsigned int tag)
 			pauseBtn->setToolTip("Pause");
 			break;
 
-		case PeerDrive::ProgressWatcher::Paused:
+		case PeerDrive::ProgressWatcher::StatePaused:
 			if (isSync)
 				msg = "Paused synchronization of %1 and %2";
 			else
@@ -139,7 +139,7 @@ void ProgressWidget::progressChange(unsigned int tag)
 			pauseBtn->setToolTip("Resume");
 			break;
 
-		case PeerDrive::ProgressWatcher::Error:
+		case PeerDrive::ProgressWatcher::StateError:
 			if (isSync) {
 				msg = "Error %1 at %2 while synchronizing %3 and %4";
 				rawMsg = "Error %1 at '%2' while synchronizing '%3' and '%4'";
@@ -163,7 +163,7 @@ void ProgressWidget::progressChange(unsigned int tag)
 	if (!isSync)
 		msg = msg.arg(itemText);
 
-	if (oldState == PeerDrive::ProgressWatcher::Error) {
+	if (oldState == PeerDrive::ProgressWatcher::StateError) {
 		rawMsg = rawMsg.arg(watcher->error(tag))
 			.arg(readTitle(watcher->errorItem(tag)))
 			.arg(rawFromText).arg(rawToText);
@@ -182,7 +182,7 @@ void ProgressWidget::progressEnd(unsigned int tag)
 
 void ProgressWidget::pause()
 {
-	if (oldState == PeerDrive::ProgressWatcher::Running)
+	if (oldState == PeerDrive::ProgressWatcher::StateRunning)
 		PeerDrive::ProgressWatcher::pause(tag);
 	else
 		PeerDrive::ProgressWatcher::resume(tag);

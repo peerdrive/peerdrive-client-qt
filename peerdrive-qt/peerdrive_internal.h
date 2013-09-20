@@ -94,13 +94,13 @@ public:
 
 	struct Completion {
 		volatile bool done;
-		volatile int err;
+		volatile Error err;
 		int msg;
 		QByteArray *cnf;
 	};
 
-	int sendReq(int msg, Completion *completion, const QByteArray &req);
-	int poll(Completion *completion);
+	Error sendReq(int msg, Completion *completion, const QByteArray &req);
+	Error poll(Completion *completion);
 
 signals:
 	void pushSendQueue();
@@ -113,7 +113,7 @@ private slots:
 	void sockError(QAbstractSocket::SocketError socketError);
 
 private:
-	void abortCompletions(int err);
+	void abortCompletions(Error err);
 
 	QTcpSocket socket;
 	QQueue<QByteArray> sendQueue;
@@ -130,12 +130,12 @@ class Connection : public QThread
 	Q_OBJECT
 
 public:
-	int rpc(int msg, const QByteArray &req);
-	int rpc(int msg, const QByteArray &req, QByteArray &cnf);
+	Error rpc(int msg, const QByteArray &req);
+	Error rpc(int msg, const QByteArray &req, QByteArray &cnf);
 	static Connection *instance();
 
 	template <typename R, typename C>
-	static int defaultRPC(int msg, const R &req, C &cnf)
+	static Error defaultRPC(int msg, const R &req, C &cnf)
 	{
 		QByteArray rawReq;
 
@@ -143,18 +143,20 @@ public:
 		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
 
 		QByteArray rawCnf;
-		int err = Connection::instance()->rpc(msg, rawReq, rawCnf);
+		Error err = Connection::instance()->rpc(msg, rawReq, rawCnf);
 		if (err)
 			return err;
 
-		if (!cnf.ParseFromArray(rawCnf.constData(), rawCnf.size()))
-			return ERR_EBADRPC;
+		if (!cnf.ParseFromArray(rawCnf.constData(), rawCnf.size())) {
+			qDebug() << rawCnf.toHex();
+			return ErrBadRPC;
+		}
 
-		return 0;
+		return ErrNoError;
 	}
 
 	template <typename R>
-	static int defaultRPC(int msg, const R &req)
+	static Error defaultRPC(int msg, const R &req)
 	{
 		QByteArray rawReq;
 
@@ -164,8 +166,8 @@ public:
 		return Connection::instance()->rpc(msg, rawReq);
 	}
 
-	int addWatch(LinkWatcher *watch, const DId &doc);
-	int addWatch(LinkWatcher *watch, const RId &rev);
+	Error addWatch(LinkWatcher *watch, const DId &doc);
+	Error addWatch(LinkWatcher *watch, const RId &rev);
 	void delWatch(LinkWatcher *watch, const DId &doc);
 	void delWatch(LinkWatcher *watch, const RId &rev);
 	void addProgressWatch(ProgressWatcher *watch);
@@ -179,7 +181,7 @@ public:
 		Link item;
 		ProgressWatcher::Type type;
 		ProgressWatcher::State state;
-		int error;
+		Error error;
 		int progress;
 		Link errorItem;
 	};
@@ -187,7 +189,7 @@ public:
 	QList<unsigned int> progressTags() const;
 
 protected:
-	int _rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion);
+	Error _rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion);
 	void run();
 
 

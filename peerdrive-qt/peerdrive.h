@@ -43,6 +43,149 @@ namespace PeerDrive {
 
 class EnumCnf_Store; // FIXME: remove from here
 
+enum Error {
+	ErrNoError = 0,
+	ErrConflict = 1,
+	Err2Big = 2,
+	ErrAcces = 3,
+	ErrAddrInUse = 4,
+	ErrAddrNotAvail = 5,
+	ErrAdv = 6,
+	ErrAFNoSupport = 7,
+	ErrAgain = 8,
+	ErrAlign = 9,
+	ErrAlready = 10,
+	ErrBadE = 11,
+	ErrBadF = 12,
+	ErrBadFd = 13,
+	ErrBadMsg = 14,
+	ErrBadR = 15,
+	ErrBadRPC = 16,
+	ErrBadRQC = 17,
+	ErrBadSLT = 18,
+	ErrBFont = 19,
+	ErrBusy = 20,
+	ErrChild = 21,
+	ErrCHRNG = 22,
+	ErrComm = 23,
+	ErrConnAborted = 24,
+	ErrConnRefused = 25,
+	ErrConnReset = 26,
+	ErrDeadLK = 27,
+	ErrDeadlock = 28,
+	ErrDestAddrReq = 29,
+	ErrDirty = 30,
+	ErrDOM = 31,
+	ErrDOTDOT = 32,
+	ErrDQUOT = 33,
+	ErrDUPPKG = 34,
+	ErrEXIST = 35,
+	ErrFAULT = 36,
+	ErrFBIG = 37,
+	ErrHOSTDOWN = 38,
+	ErrHOSTUNREACH = 39,
+	ErrIDRM = 40,
+	ErrINIT = 41,
+	ErrINPROGRESS = 42,
+	ErrINTR = 43,
+	ErrINVAL = 44,
+	ErrIO = 45,
+	ErrISCONN = 46,
+	ErrISDIR = 47,
+	ErrISNAM = 48,
+	ErrLBIN = 49,
+	ErrL2HLT = 50,
+	ErrL2NSYNC = 51,
+	ErrL3HLT = 52,
+	ErrL3RST = 53,
+	ErrLIBACC = 54,
+	ErrLIBBAD = 55,
+	ErrLIBEXEC = 56,
+	ErrLIBMAX = 57,
+	ErrLIBSCN = 58,
+	ErrLNRNG = 59,
+	ErrLOOP = 60,
+	ErrMFILE = 61,
+	ErrMLINK = 62,
+	ErrMSGSIZE = 63,
+	ErrMULTIHOP = 64,
+	ErrNAMETOOLONG = 65,
+	ErrNAVAIL = 66,
+	ErrNET = 67,
+	ErrNETDOWN = 68,
+	ErrNETRESET = 69,
+	ErrNETUNREACH = 70,
+	ErrNFILE = 71,
+	ErrNOANO = 72,
+	ErrNOBUFS = 73,
+	ErrNOCSI = 74,
+	ErrNODATA = 75,
+	ErrNODEV = 76,
+	ErrNOENT = 77,
+	ErrNOEXEC = 78,
+	ErrNOLCK = 79,
+	ErrNOLINK = 80,
+	ErrNOMEM = 81,
+	ErrNOMSG = 82,
+	ErrNONET = 83,
+	ErrNOPKG = 84,
+	ErrNOPROTOOPT = 85,
+	ErrNOSPC = 86,
+	ErrNOSR = 87,
+	ErrNOSYM = 88,
+	ErrNOSYS = 89,
+	ErrNOTBLK = 90,
+	ErrNOTCONN = 91,
+	ErrNOTDIR = 92,
+	ErrNOTEMPTY = 93,
+	ErrNOTNAM = 94,
+	ErrNOTSOCK = 95,
+	ErrNOTSUP = 96,
+	ErrNOTTY = 97,
+	ErrNOTUNIQ = 98,
+	ErrNXIO = 99,
+	ErrOPNOTSUPP = 100,
+	ErrPERM = 101,
+	ErrPFNOSUPPORT = 102,
+	ErrPIPE = 103,
+	ErrPROCLIM = 104,
+	ErrPROCUNAVAIL = 105,
+	ErrPROGMISMATCH = 106,
+	ErrPROGUNAVAIL = 107,
+	ErrPROTO = 108,
+	ErrPROTONOSUPPORT = 109,
+	ErrPROTOTYPE = 110,
+	ErrRANGE = 111,
+	ErrREFUSED = 112,
+	ErrREMCHG = 113,
+	ErrREMDEV = 114,
+	ErrREMOTE = 115,
+	ErrREMOTEIO = 116,
+	ErrREMOTERELEASE = 117,
+	ErrROFS = 118,
+	ErrRPCMISMATCH = 119,
+	ErrRREMOTE = 120,
+	ErrSHUTDOWN = 121,
+	ErrSOCKTNOSUPPORT = 122,
+	ErrSPIPE = 123,
+	ErrSRCH = 124,
+	ErrSRMNT = 125,
+	ErrSTALE = 126,
+	ErrSUCCESS = 127,
+	ErrTIME = 128,
+	ErrTIMEDOUT = 129,
+	ErrTOOMANYREFS = 130,
+	ErrTXTBSY = 131,
+	ErrUCLEAN = 132,
+	ErrUNATCH = 133,
+	ErrUSERS = 134,
+	ErrVERSION = 135,
+	ErrWOULDBLOCK = 136,
+	ErrXDEV = 137,
+	ErrXFULL = 138,
+	ErrXDOMAIN = 139,
+};
+
 // TODO: derive from Exception, add what()
 class ValueError
 {
@@ -261,9 +404,9 @@ public:
 	};
 
 	enum State {
-		Running,
-		Paused,
-		Error
+		StateRunning,
+		StatePaused,
+		StateError
 	};
 
 	QList<unsigned int> tags() const;
@@ -273,7 +416,7 @@ public:
 	Link item(unsigned int tag) const;
 	Type type(unsigned int tag) const;
 	State state(unsigned int tag) const;
-	int error(unsigned int tag) const;
+	Error error(unsigned int tag) const;
 	Link errorItem(unsigned int tag) const;
 	int progress(unsigned int tag) const;
 
@@ -308,10 +451,10 @@ public:
 	Store* fromLabel(const QString &label) const;
 	Store* fromSId(const DId &sid) const;
 
-	static DId mount(int *result, const QString &src, const QString &label,
+	static DId mount(Error *result, const QString &src, const QString &label,
 	                 const QString &type, const QString &options = QString(),
 					 const QString &credentials = QString());
-	static int unmount(const DId &sid);
+	static Error unmount(const DId &sid);
 
 private:
 	Store *parse(const EnumCnf_Store &pb);
@@ -327,7 +470,7 @@ public:
 	RevInfo(const RId &rid, const QList<DId> &stores);
 
 	bool exists() const;
-	int error() const;
+	Error error() const;
 
 	QList<DId> stores() const;
 	int flags() const;
@@ -347,7 +490,7 @@ private:
 	void fetch(const RId &rid, const QList<DId> *stores);
 
 	bool m_exists;
-	int m_error;
+	Error m_error;
 	quint32 m_flags;
 	QList<RId> m_parents;
 	QDateTime m_mtime;
@@ -369,7 +512,7 @@ public:
 
 	bool exists() const;
 	bool exists(const DId &store) const;
-	int error() const;
+	Error error() const;
 
 	QList<DId> stores() const;
 	QList<DId> stores(const RId &rev) const;
@@ -381,7 +524,7 @@ public:
 private:
 	void fetch(const DId &doc, const QList<DId> &stores = QList<DId>());
 
-	int m_error;
+	Error m_error;
 	DId m_doc;
 	QMap<DId, QList<Link> > m_stores; // store -> revs ++ preRevs
 	QMap<RId, QList<DId> > m_revs; // revs -> stores
@@ -394,7 +537,7 @@ public:
 	LinkInfo(const RId &rev);
 	LinkInfo(const RId &rev, const QList<DId> &stores);
 
-	int error() const;
+	Error error() const;
 
 	QList<DId> docLinks() const;
 	QList<RId> revLinks() const;
@@ -403,7 +546,7 @@ private:
 	void fetch(const RId &rev, const QList<DId> *stores);
 
 	bool m_exists;
-	int m_error;
+	Error m_error;
 	QList<DId> m_docLinks;
 	QList<RId> m_revLinks;
 };
@@ -426,7 +569,7 @@ public:
 
 	const Link link() const;
 	void setLink(const Link &link);
-	int error() const;
+	Error error() const;
 
 	bool peek();
 	bool update(const QString &creator = QString());
@@ -485,7 +628,7 @@ private:
 
 	bool m_open;
 	unsigned int m_handle;
-	int m_error;
+	Error m_error;
 	Link m_link;
 	QMap<QString, qint64> m_pos;
 	mutable QString m_type;

@@ -101,7 +101,7 @@ ConnectionHandler::~ConnectionHandler()
 		socket.waitForBytesWritten(1000);
 	socket.disconnectFromHost();
 
-	abortCompletions(ERR_ECONNRESET);
+	abortCompletions(ErrConnReset);
 }
 
 int ConnectionHandler::connect(const QString &hostName, quint16 port)
@@ -118,15 +118,15 @@ void ConnectionHandler::disconnect()
 	socket.disconnectFromHost();
 }
 
-int ConnectionHandler::sendReq(int msg, Completion *completion, const QByteArray &req)
+Error ConnectionHandler::sendReq(int msg, Completion *completion, const QByteArray &req)
 {
 	completion->done = false;
-	completion->err = 0;
+	completion->err = ErrNoError;
 
 	QMutexLocker locker(&mutex);
 
 	if (socket.state() != QAbstractSocket::ConnectedState)
-		return ERR_ECONNRESET;
+		return ErrConnReset;
 
 	quint32 ref = nextRef++;
 	pendingCompletions.insert(ref, completion);
@@ -144,10 +144,10 @@ int ConnectionHandler::sendReq(int msg, Completion *completion, const QByteArray
 	locker.unlock();
 	emit pushSendQueue();
 
-	return 0;
+	return ErrNoError;
 }
 
-int ConnectionHandler::poll(Completion *completion)
+Error ConnectionHandler::poll(Completion *completion)
 {
 	QMutexLocker locker(&mutex);
 
@@ -168,7 +168,7 @@ void ConnectionHandler::sockReadySend()
 		locker.unlock();
 		if (socket.write(req) != req.size()) {
 			socket.disconnectFromHost();
-			abortCompletions(ERR_ECONNRESET);
+			abortCompletions(ErrConnReset);
 			return;
 		}
 		locker.relock();
@@ -208,16 +208,16 @@ void ConnectionHandler::sockReadyRead()
 
 void ConnectionHandler::sockDisconnected()
 {
-	abortCompletions(ERR_ECONNRESET);
+	abortCompletions(ErrConnReset);
 }
 
 void ConnectionHandler::sockError(QAbstractSocket::SocketError /*socketError*/)
 {
 	socket.disconnectFromHost();
-	abortCompletions(ERR_ECONNRESET); // TODO: use socketError
+	abortCompletions(ErrConnReset); // TODO: use socketError
 }
 
-void ConnectionHandler::abortCompletions(int err)
+void ConnectionHandler::abortCompletions(Error err)
 {
 	QMutexLocker locker(&mutex);
 
@@ -354,21 +354,21 @@ void Connection::sendInit()
 	rawReq.resize(req.ByteSize());
 	req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
 
-	int err = rpc(INIT_MSG, rawReq, rawCnf);
+	Error err = rpc(INIT_MSG, rawReq, rawCnf);
 	if (err) {
 		qDebug() << "::PeerDrive::Connection: INIT_MSG failed:" << err;
 		goto failed;
 	}
 
 	if (!cnf.ParseFromArray(rawCnf.constData(), rawCnf.size())) {
-		err = ERR_EBADRPC;
+		err = ErrBadRPC;
 		goto failed;
 	}
 
 	if (cnf.major() != 1 || cnf.minor() != 0) {
 		qDebug() << "::PeerDrive::Connection: unsupported server version:" <<
 			cnf.major() << ":" << cnf.minor();
-		err = ERR_ERPCMISMATCH;
+		err = ErrRPCMISMATCH;
 		goto failed;
 	}
 
@@ -379,7 +379,7 @@ failed:
 	handler->disconnect();
 }
 
-int Connection::rpc(int msg, const QByteArray &req, QByteArray &cnf)
+Error Connection::rpc(int msg, const QByteArray &req, QByteArray &cnf)
 {
 	cnf.clear();
 
@@ -389,7 +389,7 @@ int Connection::rpc(int msg, const QByteArray &req, QByteArray &cnf)
 	return _rpc(msg, req, &completion);
 }
 
-int Connection::rpc(int msg, const QByteArray &req)
+Error Connection::rpc(int msg, const QByteArray &req)
 {
 	QByteArray cnf;
 
@@ -399,13 +399,13 @@ int Connection::rpc(int msg, const QByteArray &req)
 	return _rpc(msg, req, &completion);
 }
 
-int Connection::_rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion)
+Error Connection::_rpc(int msg, const QByteArray &req, ConnectionHandler::Completion *completion)
 {
 #if TRACE_LEVEL >= 1
 	qDebug() << msg_names[msg];
 #endif
 
-	int ret = handler->sendReq(msg, completion, req);
+	Error ret = handler->sendReq(msg, completion, req);
 	if (ret)
 		return ret;
 
@@ -414,15 +414,15 @@ int Connection::_rpc(int msg, const QByteArray &req, ConnectionHandler::Completi
 		return ret;
 
 	if (completion->msg == msg) {
-		return 0;
+		return ErrNoError;
 	} else if (completion->msg == ERROR_MSG) {
 		ErrorCnf errCnf;
 		if (!errCnf.ParseFromArray(completion->cnf->constData(),
 		                           completion->cnf->size()))
-			return ERR_EBADRPC;
-		return errCnf.error();
+			return ErrBadRPC;
+		return static_cast<Error>(errCnf.error() + 1);
 	} else
-		return ERR_EBADRPC;
+		return ErrBadRPC;
 }
 
 void Connection::dispatchIndication(const QByteArray &buf)
@@ -493,8 +493,8 @@ void Connection::dispatchProgressStart(const ProgressStartInd &ind, bool dispatc
 	Progress *p = new Progress;
 	p->src = DId(ind.source());
 	p->dst = DId(ind.dest());
-	p->state = ProgressWatcher::Running;
-	p->error = 0;
+	p->state = ProgressWatcher::StateRunning;
+	p->error = ErrNoError;
 	p->progress = 0;
 
 	switch (ind.type()) {
@@ -529,7 +529,7 @@ void Connection::dispatchProgress(const ProgressInd &ind, bool dispatch)
 	p->progress = ind.progress();
 	p->state = static_cast<ProgressWatcher::State>(ind.state());
 	if (ind.has_err_code())
-		p->error = ind.err_code();
+		p->error = static_cast<Error>(ind.err_code() + 1);
 
 	if (ind.has_err_doc()) {
 		if (ind.has_err_rev())
@@ -579,7 +579,7 @@ void Connection::addProgressWatch(ProgressWatcher *watch)
 		req.set_enable(true);
 		rawReq.resize(req.ByteSize());
 		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
-		int err = rpc(WATCH_PROGRESS_MSG, rawReq);
+		Error err = rpc(WATCH_PROGRESS_MSG, rawReq);
 		if (err) {
 			qDebug() << "::PeerDrive::Connection::addProgressWatch: enable failed:" << err;
 			return;
@@ -627,7 +627,7 @@ void Connection::delProgressWatch(ProgressWatcher *watch)
 		req.set_enable(false);
 		rawReq.resize(req.ByteSize());
 		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
-		int err = rpc(WATCH_PROGRESS_MSG, rawReq);
+		Error err = rpc(WATCH_PROGRESS_MSG, rawReq);
 		if (err)
 			qDebug() << "::PeerDrive::Connection::delProgressWatch failed:" << err;
 	}
@@ -643,10 +643,10 @@ QList<unsigned int> Connection::progressTags() const
 	return m_progressItems.keys();
 }
 
-int Connection::addWatch(LinkWatcher *watch, const DId &doc)
+Error Connection::addWatch(LinkWatcher *watch, const DId &doc)
 {
 	QMutexLocker lock(&watchMutex);
-	int err = 0;
+	Error err = ErrNoError;
 
 	if (m_docWatches.contains(doc)) {
 		m_docWatches[doc].append(watch);
@@ -670,10 +670,10 @@ int Connection::addWatch(LinkWatcher *watch, const DId &doc)
 	return err;
 }
 
-int Connection::addWatch(LinkWatcher *watch, const RId &rev)
+Error Connection::addWatch(LinkWatcher *watch, const RId &rev)
 {
 	QMutexLocker lock(&watchMutex);
-	int err = 0;
+	Error err = ErrNoError;
 
 	if (m_revWatches.contains(rev)) {
 		m_revWatches[rev].append(watch);
@@ -713,7 +713,7 @@ void Connection::delWatch(LinkWatcher *watch, const DId &doc)
 		rawReq.resize(req.ByteSize());
 		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
 
-		int err = rpc(WATCH_REM_MSG, rawReq);
+		Error err = rpc(WATCH_REM_MSG, rawReq);
 		if (err)
 			qDebug() << "::PeerDrive::Connection: delWatch failed:" << err;
 		m_docWatches.remove(doc);
@@ -736,7 +736,7 @@ void Connection::delWatch(LinkWatcher *watch, const RId &rev)
 		rawReq.resize(req.ByteSize());
 		req.SerializeWithCachedSizesToArray((google::protobuf::uint8*)rawReq.data());
 
-		int err = rpc(WATCH_REM_MSG, rawReq);
+		Error err = rpc(WATCH_REM_MSG, rawReq);
 		if (err)
 			qDebug() << "::PeerDrive::Connection: delWatch failed:" << err;
 		m_revWatches.remove(rev);
@@ -1104,13 +1104,13 @@ ProgressWatcher::Type ProgressWatcher::type(unsigned int tag) const
 ProgressWatcher::State ProgressWatcher::state(unsigned int tag) const
 {
 	Connection::Progress *p = Connection::instance()->findProgress(tag);
-	return p ? p->state : Error;
+	return p ? p->state : StateError;
 }
 
-int ProgressWatcher::error(unsigned int tag) const
+Error ProgressWatcher::error(unsigned int tag) const
 {
 	Connection::Progress *p = Connection::instance()->findProgress(tag);
-	return p ? p->error : -1;
+	return p ? p->error : ErrNoError;
 }
 
 Link ProgressWatcher::errorItem(unsigned int tag) const
@@ -1122,7 +1122,7 @@ Link ProgressWatcher::errorItem(unsigned int tag) const
 int ProgressWatcher::progress(unsigned int tag) const
 {
 	Connection::Progress *p = Connection::instance()->findProgress(tag);
-	return p ? p->progress : -1;
+	return p ? p->progress : 0;
 }
 
 QList<unsigned int> ProgressWatcher::tags() const
@@ -1167,7 +1167,7 @@ Mounts::Mounts()
 {
 	EnumCnf cnf;
 	QByteArray rawReq, rawCnf;
-	int err = Connection::instance()->rpc(ENUM_MSG, rawReq, rawCnf);
+	Error err = Connection::instance()->rpc(ENUM_MSG, rawReq, rawCnf);
 	if (err) {
 		qDebug() << "::PeerDrive::Mounts: EnumReq failed:" << err << "\n";
 		return;
@@ -1249,7 +1249,7 @@ Mounts::Store* Mounts::fromSId(const DId &sid) const
 	return NULL;
 }
 
-DId Mounts::mount(int *result, const QString &src, const QString &label,
+DId Mounts::mount(Error *result, const QString &src, const QString &label,
                   const QString &type, const QString &options,
                   const QString &credentials)
 {
@@ -1264,7 +1264,7 @@ DId Mounts::mount(int *result, const QString &src, const QString &label,
 	if (!credentials.isEmpty())
 		req.set_credentials(credentials.toUtf8().constData());
 
-	int err = Connection::defaultRPC<MountReq, MountCnf>(MOUNT_MSG, req, cnf);
+	Error err = Connection::defaultRPC<MountReq, MountCnf>(MOUNT_MSG, req, cnf);
 	if (result)
 		*result = err;
 	if (err)
@@ -1273,7 +1273,7 @@ DId Mounts::mount(int *result, const QString &src, const QString &label,
 	return DId(cnf.sid());
 }
 
-int Mounts::unmount(const DId &sid)
+Error Mounts::unmount(const DId &sid)
 {
 	UnmountReq req;
 
@@ -1285,7 +1285,7 @@ int Mounts::unmount(const DId &sid)
 
 RevInfo::RevInfo()
 	: m_exists(false)
-	, m_error(0)
+	, m_error(ErrNoError)
 {
 }
 
@@ -1343,7 +1343,7 @@ bool RevInfo::exists() const
 	return m_exists;
 }
 
-int RevInfo::error() const
+Error RevInfo::error() const
 {
 	return m_error;
 }
@@ -1416,7 +1416,7 @@ QString RevInfo::comment() const
 /****************************************************************************/
 
 DocInfo::DocInfo()
-	: m_error(0)
+	: m_error(ErrNoError)
 {
 }
 
@@ -1486,7 +1486,7 @@ bool DocInfo::exists(const DId &store) const
 	return m_stores.contains(store);
 }
 
-int DocInfo::error() const
+Error DocInfo::error() const
 {
 	return m_error;
 }
@@ -1559,7 +1559,7 @@ QList<Link> DocInfo::preliminaryHeads(const DId &store) const
 
 LinkInfo::LinkInfo()
 	: m_exists(false)
-	, m_error(0)
+	, m_error(ErrNoError)
 {
 }
 
@@ -1604,7 +1604,7 @@ void LinkInfo::fetch(const RId &rev, const QList<DId> *stores)
 	m_exists = true;
 }
 
-int LinkInfo::error() const
+Error LinkInfo::error() const
 {
 	return m_error;
 }
@@ -1625,13 +1625,13 @@ QList<RId> LinkInfo::revLinks() const
 Document::Document()
 {
 	m_open = false;
-	m_error = ERR_EBADF;
+	m_error = ErrBadF;
 }
 
 Document::Document(const Link &link)
 {
 	m_open = false;
-	m_error = ERR_EBADF;
+	m_error = ErrBadF;
 	m_link = link;
 }
 
@@ -1654,7 +1654,7 @@ void Document::setLink(const Link &link)
 	m_link = link;
 }
 
-int Document::error() const
+Error Document::error() const
 {
 	return m_error;
 }
@@ -1663,7 +1663,7 @@ bool Document::peek()
 {
 	close();
 	if (!m_link.isValid()) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -1685,7 +1685,7 @@ bool Document::update(const QString &creator)
 {
 	close();
 	if (!m_link.isDocHeadLink()) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -1710,7 +1710,7 @@ bool Document::resume(const QString &creator)
 {
 	close();
 	if (!m_link.isDocPreRevLink()) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -1734,7 +1734,7 @@ bool Document::resume(const QString &creator)
 Value Document::get(const QString &selector)
 {
 	if (!m_open) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return Value();
 	}
 
@@ -1754,7 +1754,7 @@ Value Document::get(const QString &selector)
 bool Document::set(const QString &selector, const Value &value)
 {
 	if (!m_open) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -1765,7 +1765,7 @@ bool Document::set(const QString &selector, const Value &value)
 	req.set_selector(selector.toStdString());
 	req.set_data(data.constData(), data.size());
 
-	m_error = Connection::defaultRPC<SetDataReq>(GET_DATA_MSG, req);
+	m_error = Connection::defaultRPC<SetDataReq>(SET_DATA_MSG, req);
 	if (m_error)
 		return false;
 
@@ -1789,7 +1789,7 @@ bool Document::seek(const QString &attachment, qint64 pos)
 qint64 Document::read(const QString &attachment, char *data, qint64 maxSize, qint64 off)
 {
 	if (!m_open) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return -1;
 	}
 
@@ -1874,7 +1874,7 @@ qint64 Document::readAll(const QString &attachment, QByteArray &data)
 bool Document::write(const QString &attachment, const char *data, qint64 size)
 {
 	if (!m_open) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -1948,7 +1948,7 @@ bool Document::writeAll(const QString &attachment, const QByteArray &data)
 bool Document::resize(const QString &attachment, qint64 size)
 {
 	if (!m_open) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -2013,7 +2013,7 @@ void Document::close()
 bool Document::commit(const QString &comment)
 {
 	if (!m_open || !m_link.isDocLink()) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 
@@ -2035,7 +2035,7 @@ bool Document::commit(const QString &comment)
 bool Document::suspend(const QString &comment)
 {
 	if (!m_open || !m_link.isDocLink()) {
-		m_error = ERR_EBADF;
+		m_error = ErrBadF;
 		return false;
 	}
 

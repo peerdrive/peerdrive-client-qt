@@ -434,7 +434,7 @@ void Window::mount()
 	if (!fstab->knownLabels().contains(label))
 		return;
 
-	int res = 0;
+	PeerDrive::Error res = PeerDrive::ErrNoError;
 	PeerDrive::Mounts::mount(&res, fstab->src(label), label, fstab->type(label),
 		fstab->options(label), fstab->credentials(label)).toByteArray();
 	if (res) {

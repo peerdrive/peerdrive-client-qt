@@ -202,7 +202,7 @@ int cmd_mount(const QStringList &cmdLine)
 		std::cout << qPrintable(msg) << "...\n";
 	}
 
-	int err;
+	Error err;
 	DId sid = Mounts::mount(&err, src, label, type, options, credentials);
 	if (err) {
 		std::cerr << "Mount failed: " << err << "\n";
