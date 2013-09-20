@@ -1336,7 +1336,7 @@ void RevInfo::fetch(const RId &rid, const QList<DId> *stores)
 		RId rid(cnf.parents(j));
 		m_parents.append(rid);
 	}
-	m_mtime.setTime_t(cnf.mtime() / 1000000); // FIXME: sub-second resolution
+	m_mtime.setMSecsSinceEpoch(cnf.mtime() / 1000);
 	m_type = QString::fromUtf8(cnf.type_code().c_str());
 	m_creator = QString::fromUtf8(cnf.creator_code().c_str());
 	m_comment = QString::fromUtf8(cnf.comment().c_str());
