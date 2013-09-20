@@ -34,6 +34,7 @@ class Folder {
 public:
 	Folder();
 	Folder(const Link &link);
+	~Folder();
 
 	void setLink(const Link &link);
 	Link link() const;
@@ -44,7 +45,12 @@ public:
 	static Link lookupSingle(const QString &path);
 
 	int size() const;
+	bool add(const Link &link);
+	bool remove(const Link &link);
 
+private:
+	Document file;
+	Value content;
 };
 
 class FSTab : public QObject

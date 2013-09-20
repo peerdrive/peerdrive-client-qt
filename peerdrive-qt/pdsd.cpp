@@ -26,6 +26,112 @@
 
 namespace PeerDrive {
 
+Folder::Folder()
+{
+}
+
+Folder::Folder(const Link &link)
+	: file(link)
+{
+}
+
+Folder::~Folder()
+{
+}
+
+void Folder::setLink(const Link &link)
+{
+	file.setLink(link);
+}
+
+Link Folder::link() const
+{
+	return file.link();
+}
+
+bool Folder::load()
+{
+	if (!file.peek())
+		return false;
+
+	try {
+		content = file.get("/org.peerdrive.folder");
+	} catch (ValueError&) {
+		file.close();
+		return false;
+	}
+
+	file.close();
+	return true;
+}
+
+bool Folder::save()
+{
+	if (!file.update())
+		return false;
+
+	if (!file.set("/org.peerdrive.folder", content)) {
+		file.close();
+		return false;
+	}
+
+	if (!file.commit()) {
+		file.close();
+		return false;
+	}
+
+	file.close();
+	return true;
+}
+
+int Folder::size() const
+{
+	return content.size();
+}
+
+bool Folder::add(const Link &link)
+{
+	Link l(link);
+	l.setStore(file.link().store());
+
+	// check if the link is already in the folder
+	try {
+		for (int i = 0; i < content.size(); i++) {
+			const Value &entry = content[i];
+			if (entry[""].asLink() == l)
+				return false;
+		}
+
+		Value newEntry(Value::DICT);
+		newEntry[""] = l;
+		content.append(newEntry);
+	} catch (ValueError&) {
+		return false;
+	}
+
+	return true;
+}
+
+bool Folder::remove(const Link &link)
+{
+	Link l(link);
+	l.setStore(file.link().store());
+
+	try {
+		for (int i = 0; i < content.size(); i++) {
+			const Value &entry = content[i];
+			if (entry[""].asLink() == l) {
+				content.remove(i);
+				return true;
+			}
+		}
+	} catch (ValueError&) {
+		return false;
+	}
+
+	return false;
+}
+
 QList<Link> Folder::lookup(const QString &path)
 {
 	WalkPathReq req;
