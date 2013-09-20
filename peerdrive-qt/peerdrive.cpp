@@ -2018,7 +2018,6 @@ QString Document::type() const
 //bool Document::rebase(const RId &parent);
 //bool Document::forget();
 //bool Document::remove();
-//bool Document::replicateTo(DId &store, QDateTime depth, bool verbose);
 //bool Document::forward(const RId &toRev, const DId &srcStore, QDateTime depth,
 //	bool verbose);
 
@@ -2078,5 +2077,81 @@ bool Document::suspend(const QString &comment)
 
 	m_link = Link(m_link.store(), m_link.doc(), RId(cnf.rev()), true);
 	return true;
+}
+
+
+Replicator::Replicator()
+	: m_open(false)
+	, m_error(ErrNoError)
+	, m_handle(0)
+{
+}
+
+Replicator::~Replicator()
+{
+	release();
+}
+
+bool Replicator::replicate(const Link &item, const DId &dstStore, QDateTime depth,
+	bool verbose)
+{
+	release();
+
+	if (item.isDocLink()) {
+		ReplicateDocReq req;
+		ReplicateDocCnf cnf;
+
+		req.set_src_store(item.store().toStdString());
+		req.set_doc(item.doc().toStdString());
+		req.set_dst_store(dstStore.toStdString());
+		if (depth.isValid())
+			req.set_depth(depth.toMSecsSinceEpoch() * 1000);
+		req.set_verbose(verbose);
+
+		m_error = Connection::defaultRPC(REPLICATE_DOC_MSG, req, cnf);
+		if (m_error)
+			return false;
+
+		m_handle = cnf.handle();
+		m_open = true;
+	} else if (item.isRevLink()) {
+		ReplicateRevReq req;
+		ReplicateRevCnf cnf;
+
+		req.set_src_store(item.store().toStdString());
+		req.set_rev(item.rev().toStdString());
+		req.set_dst_store(dstStore.toStdString());
+		if (depth.isValid())
+			req.set_depth(depth.toMSecsSinceEpoch() * 1000);
+		req.set_verbose(verbose);
+
+		m_error = Connection::defaultRPC(REPLICATE_REV_MSG, req, cnf);
+		if (m_error)
+			return false;
+
+		m_handle = cnf.handle();
+		m_open = true;
+	} else {
+		m_error = ErrBadF;
+		return false;
+	}
+
+	return true;
+}
+
+Error Replicator::error() const
+{
+	return m_error;
+}
+
+void Replicator::release()
+{
+	if (m_open) {
+		CloseReq req;
+		req.set_handle(m_handle);
+		Connection::defaultRPC<CloseReq>(CLOSE_MSG, req);
+
+		m_open = false;
+	}
 }
 

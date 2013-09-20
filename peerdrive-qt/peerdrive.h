@@ -635,6 +635,22 @@ private:
 	mutable QString m_type;
 };
 
+class Replicator {
+public:
+	Replicator();
+	~Replicator();
+
+	bool replicate(const Link &item, const DId &dstStore, QDateTime depth=QDateTime(),
+		bool verbose=false);
+	Error error() const;
+	void release();
+
+private:
+	bool m_open;
+	Error m_error;
+	unsigned int m_handle;
+};
+
 }
 
 Q_DECLARE_METATYPE(PeerDrive::DId);
