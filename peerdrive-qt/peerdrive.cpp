@@ -49,11 +49,11 @@ static const char *msg_names[] = {
 	"TRUNC_MSG",
 	"WRITE_BUFFER_MSG",
 	"WRITE_COMMIT_MSG",
-	"GET_FLAGS_MSG",
+	"FSTAT_MSG",
 	"SET_FLAGS_MSG",
-	"GET_TYPE_MSG",
 	"SET_TYPE_MSG",
-	"GET_PARENTS_MSG",
+	"SET_MTIME_MSG",
+	"<unused>",
 	"MERGE_MSG",
 	"REBASE_MSG",
 	"COMMIT_MSG",
@@ -371,7 +371,7 @@ void Connection::sendInit()
 	InitCnf cnf;
 	QByteArray rawReq, rawCnf;
 
-	req.set_major(1);
+	req.set_major(2);
 	req.set_minor(0);
 	QByteArray cookie = QByteArray::fromHex(m_cookie.toLatin1());
 	req.set_cookie(cookie.constData(), cookie.size());
@@ -390,7 +390,7 @@ void Connection::sendInit()
 		goto failed;
 	}
 
-	if (cnf.major() != 1 || cnf.minor() != 0) {
+	if (cnf.major() != 2 || cnf.minor() != 0) {
 		qDebug() << "::PeerDrive::Connection: unsupported server version:" <<
 			cnf.major() << ":" << cnf.minor();
 		err = ErrRPCMISMATCH;
@@ -1309,134 +1309,230 @@ Error Mounts::unmount(const DId &sid)
 
 /****************************************************************************/
 
+namespace PeerDrive {
+
+	class RevInfoPrivate : public QSharedData {
+	public:
+		RevInfoPrivate()
+			: m_exists(false)
+			, m_error(ErrNoError)
+			, m_flags(0)
+		{ }
+
+		RevInfoPrivate(const RId &rid, const QList<DId> *stores)
+		{
+			fetch(rid, stores);
+		}
+
+		RevInfoPrivate(const StatCnf &cnf)
+			: m_error(ErrNoError)
+		{
+			decode(cnf);
+		}
+
+		RevInfoPrivate(const RevInfoPrivate &other)
+			: QSharedData(other)
+			, m_exists(other.m_exists)
+			, m_error(other.m_error)
+			, m_flags(other.m_flags)
+			, m_parents(other.m_parents)
+			, m_mtime(other.m_mtime)
+			, m_crtime(other.m_crtime)
+			, m_type(other.m_type)
+			, m_creator(other.m_creator)
+			, m_comment(other.m_comment)
+			, m_dataSize(other.m_dataSize)
+			, m_dataHash(other.m_dataHash)
+			, m_attachments(other.m_attachments)
+		{ }
+
+		~RevInfoPrivate() { }
+
+		struct Attachment {
+			quint64 size;
+			PId hash;
+			QDateTime mtime;
+			QDateTime crtime;
+		};
+
+		bool m_exists;
+		Error m_error;
+		quint32 m_flags;
+		QList<RId> m_parents;
+		QDateTime m_mtime;
+		QDateTime m_crtime;
+		QString m_type;
+		QString m_creator;
+		QString m_comment;
+		quint64 m_dataSize;
+		PId m_dataHash;
+		QMap<QString, Attachment> m_attachments;
+
+	private:
+		void fetch(const RId &rid, const QList<DId> *stores)
+		{
+			StatReq req;
+			StatCnf cnf;
+
+			m_exists = false;
+			m_flags = 0;
+
+			req.set_rev(rid.toStdString());
+			if (stores) {
+				QList<DId>::const_iterator i;
+				for (i = stores->constBegin(); i != stores->constEnd(); i++)
+					req.add_stores((*i).toStdString());
+			}
+
+			m_error = Connection::defaultRPC<StatReq, StatCnf>(STAT_MSG, req, cnf);
+			if (m_error)
+				return;
+
+			decode(cnf);
+		}
+
+		void decode(const StatCnf &cnf)
+		{
+			m_flags = cnf.flags();
+			m_dataSize = cnf.data().size();
+			m_dataHash = PId(cnf.data().hash());
+			for (int j = 0; j < cnf.attachments_size(); j++) {
+				const StatCnf_Attachment & a = cnf.attachments(j);
+				QString name(a.name().c_str());
+
+				Attachment &attachment = m_attachments[name];
+				attachment.size = a.size();
+				attachment.hash = PId(a.hash());
+				attachment.crtime.setMSecsSinceEpoch(a.crtime() / 1000);
+				attachment.mtime.setMSecsSinceEpoch(a.mtime() / 1000);
+			}
+			for (int j = 0; j < cnf.parents_size(); j++) {
+				RId rid(cnf.parents(j));
+				m_parents.append(rid);
+			}
+			m_mtime.setMSecsSinceEpoch(cnf.mtime() / 1000);
+			m_crtime.setMSecsSinceEpoch(cnf.crtime() / 1000);
+			m_type = QString::fromUtf8(cnf.type_code().c_str());
+			m_creator = QString::fromUtf8(cnf.creator_code().c_str());
+			m_comment = QString::fromUtf8(cnf.comment().c_str());
+			m_exists = true;
+		}
+	};
+
+}
+
 RevInfo::RevInfo()
-	: m_exists(false)
-	, m_error(ErrNoError)
 {
+	d = new RevInfoPrivate;
 }
 
 RevInfo::RevInfo(const RId &rid)
 {
-	fetch(rid, NULL);
+	d = new RevInfoPrivate(rid, NULL);
 }
 
 RevInfo::RevInfo(const RId &rid, const QList<DId> &stores)
 {
-	fetch(rid, &stores);
+	d = new RevInfoPrivate(rid, &stores);
 }
 
-void RevInfo::fetch(const RId &rid, const QList<DId> *stores)
+RevInfo::~RevInfo()
 {
-	StatReq req;
-	StatCnf cnf;
+}
 
-	m_exists = false;
-	m_flags = 0;
+RevInfo::RevInfo(const RevInfo &other)
+	: d(other.d)
+{
+}
 
-	req.set_rev(rid.toStdString());
-	if (stores) {
-		QList<DId>::const_iterator i;
-		for (i = stores->constBegin(); i != stores->constEnd(); i++)
-			req.add_stores((*i).toStdString());
-	}
-
-	m_error = Connection::defaultRPC<StatReq, StatCnf>(STAT_MSG, req, cnf);
-	if (m_error)
-		return;
-
-	m_flags = cnf.flags();
-	m_dataSize = cnf.data().size();
-	m_dataHash = PId(cnf.data().hash());
-	for (int j = 0; j < cnf.attachments_size(); j++) {
-		const StatCnf_Attachment & a = cnf.attachments(j);
-		QString name(a.name().c_str());
-		m_attachmentSizes[name] = a.size();
-		m_attachmentHashes[name] = PId(a.hash());
-	}
-	for (int j = 0; j < cnf.parents_size(); j++) {
-		RId rid(cnf.parents(j));
-		m_parents.append(rid);
-	}
-	m_mtime.setMSecsSinceEpoch(cnf.mtime() / 1000);
-	m_type = QString::fromUtf8(cnf.type_code().c_str());
-	m_creator = QString::fromUtf8(cnf.creator_code().c_str());
-	m_comment = QString::fromUtf8(cnf.comment().c_str());
-	m_exists = true;
+RevInfo& RevInfo::operator=(const RevInfo &other)
+{
+	d = other.d;
+	return *this;
 }
 
 bool RevInfo::exists() const
 {
-	return m_exists;
+	return d->m_exists;
 }
 
 Error RevInfo::error() const
 {
-	return m_error;
+	return d->m_error;
 }
 
 int RevInfo::flags() const
 {
-	return m_flags;
+	return d->m_flags;
 }
 
 quint64 RevInfo::size() const
 {
-	quint64 sum = m_dataSize;
-	for (QMap<QString, quint64>::const_iterator i = m_attachmentSizes.constBegin();
-	     i != m_attachmentSizes.constEnd(); ++i)
-		sum += i.value();
+	quint64 sum = d->m_dataSize;
+	foreach (const RevInfoPrivate::Attachment &a, d->m_attachments)
+		sum += a.size;
 
 	return sum;
 }
 
 quint64 RevInfo::dataSize() const
 {
-	return m_dataSize;
+	return d->m_dataSize;
 }
 
 quint64 RevInfo::attachmentSize(const QString &attachment) const
 {
-	return m_attachmentSizes[attachment];
+	return d->m_attachments[attachment].size;
 }
 
 PId RevInfo::dataHash() const
 {
-	return m_dataHash;
+	return d->m_dataHash;
 }
 
 PId RevInfo::attachmentHash(const QString &attachment) const
 {
-	return m_attachmentHashes[attachment];
+	return d->m_attachments[attachment].hash;
+}
+
+QDateTime RevInfo::attachmentMtime(const QString &attachment) const
+{
+	return d->m_attachments[attachment].mtime;
+}
+
+QDateTime RevInfo::attachmentCrtime(const QString &attachment) const
+{
+	return d->m_attachments[attachment].crtime;
 }
 
 QList<QString> RevInfo::attachments() const
 {
-	return m_attachmentSizes.keys();
+	return d->m_attachments.keys();
 }
 
 QList<RId> RevInfo::parents() const
 {
-	return m_parents;
+	return d->m_parents;
 }
 
 QDateTime RevInfo::mtime() const
 {
-	return m_mtime;
+	return d->m_mtime;
 }
 
 QString RevInfo::type() const
 {
-	return m_type;
+	return d->m_type;
 }
 
 QString RevInfo::creator() const
 {
-	return m_creator;
+	return d->m_creator;
 }
 
 QString RevInfo::comment() const
 {
-	return m_comment;
+	return d->m_comment;
 }
 
 /****************************************************************************/
@@ -1990,30 +2086,27 @@ bool Document::resize(const QString &attachment, qint64 size)
 	return true;
 }
 
-QString Document::type() const
+RevInfo Document::info() const
 {
 	if (!m_open)
-		return QString();
+		return RevInfo();
 
-	if (!m_type.isNull())
-		return m_type;
-
-	GetTypeReq req;
-	GetTypeCnf cnf;
+	FStatReq req;
+	StatCnf cnf;
 	req.set_handle(m_handle);
 
-	int error = Connection::defaultRPC<GetTypeReq, GetTypeCnf>(GET_TYPE_MSG, req, cnf);
+	int error = Connection::defaultRPC(FSTAT_MSG, req, cnf);
 	if (error)
-		return QString();
+		return RevInfo();
 
-	m_type = QString::fromUtf8(cnf.type_code().c_str());
-	return m_type;
+	RevInfo result;
+	result.d = new RevInfoPrivate(cnf);
+	return result;
 }
 
-//unsigned int Document::flags() const;
 //bool Document::setFlags(unsigned int flags);
 //bool Document::setType(const QString &type);
-//QList<Link> Document::parents() const;
+//bool Document::setMTime(const QDateTime &mtime);
 //bool Document::merge(const Link &rev, QDateTime depth=QDateTime(), bool verbose=false);
 //bool Document::rebase(const RId &parent);
 //bool Document::forget();

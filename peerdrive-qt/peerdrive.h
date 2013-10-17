@@ -18,12 +18,13 @@
 #ifndef _PEERDRIVE_H_
 #define _PEERDRIVE_H_
 
-#include <QList>
-#include <QString>
-#include <QDateTime>
-#include <QMap>
 #include <QByteArray>
+#include <QDateTime>
+#include <QList>
+#include <QMap>
 #include <QMetaType>
+#include <QSharedData>
+#include <QString>
 
 #include <string>
 
@@ -464,11 +465,17 @@ private:
 };
 
 
+class RevInfoPrivate;
+
 class RevInfo {
 public:
 	RevInfo();
 	RevInfo(const RId &rid);
 	RevInfo(const RId &rid, const QList<DId> &stores);
+	~RevInfo();
+
+	RevInfo(const RevInfo &other);
+	RevInfo& operator=(const RevInfo &other);
 
 	bool exists() const;
 	Error error() const;
@@ -480,28 +487,19 @@ public:
 	quint64 attachmentSize(const QString &attachment) const;
 	PId dataHash() const;
 	PId attachmentHash(const QString &attachment) const;
+	QDateTime attachmentMtime(const QString &attachment) const;
+	QDateTime attachmentCrtime(const QString &attachment) const;
 	QList<QString> attachments() const;
 	QList<RId> parents() const;
 	QDateTime mtime() const;
+	QDateTime crtime() const;
 	QString type() const;
 	QString creator() const;
 	QString comment() const;
 
 private:
-	void fetch(const RId &rid, const QList<DId> *stores);
-
-	bool m_exists;
-	Error m_error;
-	quint32 m_flags;
-	QList<RId> m_parents;
-	QDateTime m_mtime;
-	QString m_type;
-	QString m_creator;
-	QString m_comment;
-	quint64 m_dataSize;
-	PId m_dataHash;
-	QMap<QString, quint64> m_attachmentSizes;
-	QMap<QString, PId> m_attachmentHashes;
+	QSharedDataPointer<RevInfoPrivate> d;
+	friend class Document;
 };
 
 class DocInfo {
@@ -612,11 +610,10 @@ public:
 	 * Metadata
 	 */
 
-	unsigned int flags() const;
+	RevInfo info() const;
 	bool setFlags(unsigned int flags);
-	QString type() const;
 	bool setType(const QString &type);
-	QList<Link> parents() const;
+	bool setMTime(const QDateTime &mtime);
 	bool merge(const Link &rev, QDateTime depth=QDateTime(), bool verbose=false);
 	bool rebase(const RId &parent);
 

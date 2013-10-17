@@ -44,11 +44,11 @@
 #define TRUNC_MSG           0x00c
 #define WRITE_BUFFER_MSG    0x00d
 #define WRITE_COMMIT_MSG    0x00e
-#define GET_FLAGS_MSG       0x00f
+#define FSTAT_MSG           0x00f
 #define SET_FLAGS_MSG       0x010
-#define GET_TYPE_MSG        0x011
-#define SET_TYPE_MSG        0x012
-#define GET_PARENTS_MSG     0x013
+#define SET_TYPE_MSG        0x011
+#define SET_MTIME_MSG       0x012
+
 #define MERGE_MSG           0x014
 #define REBASE_MSG          0x015
 #define COMMIT_MSG          0x016
