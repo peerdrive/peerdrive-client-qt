@@ -1,9 +1,11 @@
 
-#include <peerdrive-qt/foldermodel.h>
-#include <peerdrive-qt/pdsd.h>
+#include <QDockWidget>
 #include <QtGui>
+#include <peerdrive-qt/pdsd.h>
 
+#include "dndfoldermodel.h"
 #include "mainwindow.h"
+#include "operations.h"
 
 MainWindow::MainWindow()
 {
@@ -18,7 +20,7 @@ MainWindow::MainWindow()
 	columnsMenu = menuBar()->addMenu(tr("&Columns"));
 	connect(columnsMenu, SIGNAL(aboutToShow()), this, SLOT(showColumnsMenu()));
 
-	model = new PeerDrive::FolderModel(this);
+	model = new DndFolderModel(this);
 	connect(model, SIGNAL(rowsInserted(QModelIndex,int,int)), this,
 		SLOT(modelRowsInserted(QModelIndex,int,int)));
 	connect(model, SIGNAL(dataChanged(QModelIndex,QModelIndex)), this,
@@ -29,12 +31,24 @@ MainWindow::MainWindow()
 	treeView->setModel(model);
 	treeView->sortByColumn(0, Qt::AscendingOrder);
 	treeView->setSortingEnabled(true);
+	treeView->setDragEnabled(true);
+	treeView->setAcceptDrops(true);
+	treeView->setDropIndicatorShown(true);
 	connect(treeView, SIGNAL(activated(QModelIndex)), this,
 		SLOT(itemActivated(QModelIndex)));
 
 	setCentralWidget(treeView);
 	setWindowTitle(QObject::tr("Simple Tree Model"));
 	setUnifiedTitleAndToolBarOnMac(true);
+
+	// dock widgets
+	Operations *operations = new Operations(this);
+	connect(model, SIGNAL(requestReplicate(QList<PeerDrive::Link>, PeerDrive::Link)),
+		operations, SLOT(replicate(QList<PeerDrive::Link>, PeerDrive::Link)));
+
+	QDockWidget *dock = new QDockWidget(tr("Operations"), this);
+	dock->setWidget(operations);
+	addDockWidget(Qt::BottomDockWidgetArea, dock);
 }
 
 MainWindow::~MainWindow()

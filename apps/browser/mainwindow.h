@@ -4,10 +4,7 @@
 #include <QMainWindow>
 #include <QSet>
 
-namespace PeerDrive {
-	class FolderModel;
-}
-
+class DndFolderModel;
 class QAction;
 class QMenu;
 class QTreeView;
@@ -34,7 +31,7 @@ private:
 	void addColumnEntry(QMenu *menu, const QStringList &columns, const QString &key,
 		const QString &display);
 
-	PeerDrive::FolderModel *model;
+	DndFolderModel *model;
 	QTreeView *treeView;
 	QMenu *columnsMenu;
 	QSet<QString> allTypeCodes;
