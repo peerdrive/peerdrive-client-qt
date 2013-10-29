@@ -21,9 +21,12 @@
 
 #include <QIcon>
 #include <QList>
+#include <QMimeData>
 #include <QSet>
+#include <QUrl>
 #include <QVariant>
 #include <QLocale>
+#include <QThreadPool>
 #include <stdexcept>
 
 #include "foldermodel.h"
@@ -32,10 +35,6 @@
 #include <QtDebug>
 
 using namespace PeerDrive;
-
-/*****************************************************************************/
-
-
 
 /*****************************************************************************/
 
@@ -205,10 +204,12 @@ QVariant FolderModel::headerData(int section, Qt::Orientation orientation, int r
 
 Qt::ItemFlags FolderModel::flags(const QModelIndex &index) const
 {
-	if (!index.isValid())
-		return 0;
+	Qt::ItemFlags flags = 0;
 
-	return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+	if (index.isValid())
+		flags |= Qt::ItemIsDragEnabled | Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+
+	return flags;
 }
 
 void FolderModel::sort(int column, Qt::SortOrder order)
@@ -282,6 +283,43 @@ void FolderModel::removeColumn(int i)
 
 	d->worker.removeColumn(i);
 	d->removeNodeColumn(d->root, i);
+}
+
+QStringList FolderModel::mimeTypes() const
+{
+	QStringList types;
+	types << "application/x-peerdrive-links";
+	return types;
+}
+
+QMimeData *FolderModel::mimeData(const QModelIndexList &indexes) const
+{
+	QMimeData *mimeData = new QMimeData();
+	QStringList links;
+	QList<QUrl> urls;
+
+	foreach(const QModelIndex index, indexes) {
+		if (!index.isValid())
+			continue;
+
+		FolderModelPrivate::Node *node = d->node(index);
+		QString link(node->link.uri());
+		if (!link.isEmpty())
+			links << link;
+
+		link = node->link.getOsPath();
+		if (!link.isEmpty())
+			urls << QUrl::fromLocalFile(link);
+	}
+
+	if (!links.isEmpty())
+		mimeData->setData("application/x-peerdrive-links",
+			links.join("\n").toLocal8Bit());
+
+	if (!urls.isEmpty())
+		mimeData->setUrls(urls);
+
+	return mimeData;
 }
 
 /*****************************************************************************/
@@ -474,6 +512,8 @@ void FolderModelPrivate::gotItemInfos(const QList<FolderInfo> &infos)
 
 void FolderModelPrivate::updateNode(Node *node, const FolderInfo &info)
 {
+	node->link = info.link;
+
 	if (!node->fetched) {
 		node->fetched = true;
 		if (node->parent) {

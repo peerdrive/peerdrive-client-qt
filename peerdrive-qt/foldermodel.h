@@ -66,6 +66,10 @@ public:
 
 	void sort(int column, Qt::SortOrder order = Qt::AscendingOrder);
 
+	// DnD stuff
+	QStringList mimeTypes() const;
+	QMimeData *mimeData(const QModelIndexList &indexes) const;
+
 signals:
 	void fetched(const QModelIndex &parent);
 
