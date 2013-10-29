@@ -84,6 +84,11 @@ bool Folder::save()
 	return true;
 }
 
+Error Folder::error() const
+{
+	return file.error();
+}
+
 int Folder::size() const
 {
 	return content.size();
@@ -459,6 +464,24 @@ QString Registry::icon(const QString &uti) const
 QString Registry::title(const QString &uti) const
 {
 	return search(uti, "display", true, Value(QString("unknown"))).asString();
+}
+
+
+QString readTitle(const Link &link, int maxLength)
+{
+	QString name = "<Unknown>";
+	try {
+		Document file(link);
+		if (!file.peek())
+			return name;
+
+		name = file.get("/org.peerdrive.annotation/title").asString();
+	} catch (ValueError&) {
+	}
+
+	if (name.length() > maxLength)
+		name = name.left(maxLength-3) + "...";
+	return name;
 }
 
 }

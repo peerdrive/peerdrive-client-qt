@@ -40,6 +40,7 @@ public:
 	Link link() const;
 	bool load();
 	bool save();
+	Error error() const;
 
 	static QList<Link> lookup(const QString &path);
 	static Link lookupSingle(const QString &path);
@@ -125,6 +126,8 @@ private:
 	Value registry;
 	LinkWatcher watch;
 };
+
+QString readTitle(const Link &link, int maxLength = 4096);
 
 }
 
