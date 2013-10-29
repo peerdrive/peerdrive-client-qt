@@ -19,7 +19,6 @@
 #include <peerdrive-qt/peerdrive.h>
 #include <peerdrive-qt/pdsd.h>
 #include "progresswidget.h"
-#include "utils.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -84,13 +83,13 @@ ProgressWidget::ProgressWidget(PeerDrive::ProgressWatcher *watcher,
 	mainLayout->addWidget(progressBar);
 	setLayout(mainLayout);
 
-	rawFromText = readTitle(watcher->source(tag));
+	rawFromText = PeerDrive::readTitle(watcher->source(tag));
 	fromText = "<a href=\"" + watcher->source(tag).uri() + "\">" +
 		Qt::escape(rawFromText) + "</a>";
-	rawToText = readTitle(watcher->destination(tag));
+	rawToText = PeerDrive::readTitle(watcher->destination(tag));
 	toText = "<a href=\"" + watcher->destination(tag).uri() + "\">" +
 		Qt::escape(rawToText) + "</a>";
-	rawItemText = readTitle(watcher->item(tag));
+	rawItemText = PeerDrive::readTitle(watcher->item(tag));
 	itemText = "<a href=\"" + watcher->item(tag).uri() + "\">" +
 		Qt::escape(rawItemText) + "</a>";
 

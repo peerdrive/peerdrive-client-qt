@@ -151,6 +151,10 @@ Window::Window()
 	setWindowFlags(Qt::Window | Qt::WindowCloseButtonHint | Qt::WindowMinimizeButtonHint);
 
 	fillSyncRules();
+
+	// look for already running operations
+	foreach(unsigned int tag, progressWatch->tags())
+		progressStart(tag);
 }
 
 void Window::showTrayMenu()
