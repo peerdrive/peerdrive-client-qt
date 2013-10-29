@@ -33,6 +33,7 @@ public:
 	enum ItemDataRole {
 		LinkRole = Qt::UserRole,
 		TypeCodeRole,
+		IsFolderRole
 	};
 
 	FolderModel(QObject *parent = 0);

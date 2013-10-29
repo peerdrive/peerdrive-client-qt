@@ -184,6 +184,8 @@ QVariant FolderModel::data(const QModelIndex &index, int role) const
 			return QVariant::fromValue(node->link);
 		case TypeCodeRole:
 			return node->type;
+		case IsFolderRole:
+			return node->isFolder;
 		default:
 			return QVariant();
 	}
@@ -813,7 +815,7 @@ void FolderGatherer::getItemInfos(const Link &item)
 			QByteArray tmp;
 			Value meta;
 
-			info.isFolder = Registry::instance().conformes(file.type(),
+			info.isFolder = Registry::instance().conformes(info.type,
 				"org.peerdrive.folder");
 
 			LinkInfo linkInfo(item.rev(), QList<DId>() << store);
@@ -844,7 +846,7 @@ void FolderGatherer::getRootInfos()
 	info.link = LinkWatcher::rootDoc;
 	info.exists = true;
 	info.type = "org.peerdrive.store";
-	info.isFolder = true;
+	info.isFolder = false;
 
 	Mounts mounts;
 	foreach (Mounts::Store *s, mounts.regularStores()) {
