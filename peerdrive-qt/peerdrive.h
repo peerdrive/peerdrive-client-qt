@@ -316,7 +316,7 @@ private:
 class Link {
 public:
 	Link();
-	Link(const QString &uri);
+	Link(const QString &uri, bool update = true);
 	Link(const DId &store, const RId &rev);
 	Link(const DId &store, const DId &doc, bool update = true);
 	Link(const DId &store, const DId &doc, const RId &rev, bool isPreRev = false);

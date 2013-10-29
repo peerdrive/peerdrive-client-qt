@@ -788,7 +788,7 @@ Link::Link()
 	m_state = INVALID;
 }
 
-Link::Link(const QString &uri)
+Link::Link(const QString &uri, bool doUpdate)
 {
 	m_state = INVALID;
 	QStringList frags = uri.split(":");
@@ -803,6 +803,8 @@ Link::Link(const QString &uri)
 		m_state = DOC_HEAD;
 		m_store = DId(store);
 		m_doc = DId(item);
+		if (doUpdate)
+			update();
 	} else if (frags.at(0) == "rev") {
 		m_state = REV;
 		m_store = DId(store);
